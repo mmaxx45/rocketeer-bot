@@ -9,6 +9,10 @@ const config = require('../config');
 function createWebServer(client) {
   const app = express();
 
+  if (process.env.TRUST_PROXY === 'true') {
+    app.set('trust proxy', 1);
+  }
+
   const viewsDir = path.join(__dirname, 'views');
   app.set('view engine', 'ejs');
   app.set('views', viewsDir);
@@ -25,13 +29,17 @@ function createWebServer(client) {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+// Session config
   app.use(session({
     secret: config.web.sessionSecret,
     resave: false,
     saveUninitialized: false,
+    proxy: process.env.TRUST_PROXY === 'true',
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: true,
       maxAge: 24 * 60 * 60 * 1000,
+      sameSite: 'lax',
+      httpOnly: true
     },
   }));
 
