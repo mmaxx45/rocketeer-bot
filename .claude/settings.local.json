@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/c/Program Files/nodejs/node.exe\" --version)",
+      "Bash(\"/c/Program Files \\(x86\\)/nodejs/node.exe\" --version)",
+      "Bash(\"$LOCALAPPDATA/Programs/nodejs/node.exe\" --version)",
+      "Bash(\"/c/Program Files/nodejs/npm.cmd\" install --prefix \"C:/Users/mmaxx/claude/rocketeerbot\")",
+      "Bash(\"/c/Program Files/nodejs/npm.cmd\" search passport-discord)"
+    ]
+  }
+}

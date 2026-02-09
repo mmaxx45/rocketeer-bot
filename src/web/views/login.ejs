@@ -1,0 +1,50 @@
+<%- header %>
+
+<div class="text-center mt-5">
+  <h1 class="display-4 fw-bold mb-3">
+    <i class="bi bi-rocket-takeoff"></i> RocketeerBot
+  </h1>
+  <p class="lead text-muted mb-4">
+    Crosspost detection, warning system, and moderation tools for your Discord server.
+  </p>
+
+  <div class="row justify-content-center mb-5">
+    <div class="col-md-8">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <div class="card bg-dark border-secondary h-100">
+            <div class="card-body">
+              <i class="bi bi-shield-check fs-2 text-primary"></i>
+              <h5 class="card-title mt-2">Crosspost Detection</h5>
+              <p class="card-text text-muted small">Automatically detects and removes duplicate messages across channels.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card bg-dark border-secondary h-100">
+            <div class="card-body">
+              <i class="bi bi-exclamation-triangle fs-2 text-warning"></i>
+              <h5 class="card-title mt-2">Warning System</h5>
+              <p class="card-text text-muted small">Issue and track warnings with escalation to bans.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card bg-dark border-secondary h-100">
+            <div class="card-body">
+              <i class="bi bi-gear fs-2 text-success"></i>
+              <h5 class="card-title mt-2">Web Dashboard</h5>
+              <p class="card-text text-muted small">Configure everything from a clean web interface.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <a href="/auth/discord" class="btn btn-primary btn-lg px-5">
+    <i class="bi bi-discord"></i> Login with Discord
+  </a>
+</div>
+
+<%- footer %>

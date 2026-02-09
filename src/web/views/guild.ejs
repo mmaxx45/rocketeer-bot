@@ -1,0 +1,235 @@
+<%- header %>
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/dashboard">Servers</a></li>
+    <li class="breadcrumb-item active"><%= guild.name %></li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2><%= guild.name %> &mdash; Settings</h2>
+  <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
+    <i class="bi bi-exclamation-triangle"></i> View Warnings
+  </a>
+</div>
+
+<div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3"></div>
+
+<form id="settings-form" data-guild-id="<%= guild.id %>">
+  <div class="row g-4">
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-shield"></i> Moderator Role</h5>
+          <p class="card-text text-muted small">This role and all roles above it are exempt from crosspost detection.</p>
+          <select name="moderator_role_id" class="form-select">
+            <option value="">-- Not set --</option>
+            <% roles.forEach(role => { %>
+              <option value="<%= role.id %>" <%= settings.moderator_role_id === role.id ? 'selected' : '' %>>
+                <%= role.name %>
+              </option>
+            <% }); %>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-sliders"></i> Similarity Threshold</h5>
+          <p class="card-text text-muted small">How similar messages must be to trigger crosspost detection (1-100%).</p>
+          <div class="d-flex align-items-center gap-3">
+            <input type="range" name="crosspost_threshold" class="form-range flex-grow-1"
+                   min="1" max="100" value="<%= settings.crosspost_threshold %>"
+                   oninput="this.nextElementSibling.textContent = this.value + '%'">
+            <span class="badge bg-primary fs-6"><%= settings.crosspost_threshold %>%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-clock"></i> Detection Window</h5>
+          <p class="card-text text-muted small">How quickly a similar message in another channel triggers crosspost detection.</p>
+          <div class="input-group">
+            <input type="number" name="crosspost_detection_seconds" class="form-control"
+                   min="5" max="3600" value="<%= settings.crosspost_detection_seconds %>">
+            <span class="input-group-text">seconds</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-arrow-repeat"></i> Repeat Offense Window</h5>
+          <p class="card-text text-muted small">If a user crossposts again within this period, it escalates to a warning.</p>
+          <div class="input-group">
+            <input type="number" name="crosspost_window_hours" class="form-control"
+                   min="1" max="168" value="<%= settings.crosspost_window_hours %>">
+            <span class="input-group-text">hours</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-exclamation-octagon"></i> Warning Threshold</h5>
+          <p class="card-text text-muted small">Number of warnings before moderators are prompted to ban.</p>
+          <div class="input-group">
+            <input type="number" name="warning_threshold" class="form-control"
+                   min="1" max="50" value="<%= settings.warning_threshold %>">
+            <span class="input-group-text">warnings</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-person-badge"></i> Warn Role (Trial Mod)</h5>
+          <p class="card-text text-muted small">Members with this role can issue warnings but cannot ban.</p>
+          <select name="warn_role_id" class="form-select">
+            <option value="">-- Not set --</option>
+            <% roles.forEach(role => { %>
+              <option value="<%= role.id %>" <%= settings.warn_role_id === role.id ? 'selected' : '' %>>
+                <%= role.name %>
+              </option>
+            <% }); %>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-journal-text"></i> Warn Log Channel</h5>
+          <p class="card-text text-muted small">Channel where warning details are posted. Set to "Disabled" to turn off.</p>
+          <select name="warn_log_channel_id" class="form-select">
+            <option value="">-- Disabled --</option>
+            <% channels.forEach(ch => { %>
+              <option value="<%= ch.id %>" <%= settings.warn_log_channel_id === ch.id ? 'selected' : '' %>>
+                #<%= ch.name %>
+              </option>
+            <% }); %>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-hash"></i> Exempt Channels</h5>
+          <p class="card-text text-muted small">Messages in these channels are not checked for crossposts.</p>
+          <div class="d-flex flex-wrap gap-2 mb-3" id="exempt-channels-list">
+            <% exemptChannels.forEach(chId => { %>
+              <% const ch = channels.find(c => c.id === chId); %>
+              <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 exempt-badge" data-channel-id="<%= chId %>" style="font-size: 0.875rem;">
+  #<%= ch ? ch.name : chId %>
+  <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
+          onclick="removeExemptChannel('<%= guild.id %>', '<%= chId %>', this)"></button>
+</span>
+            <% }); %>
+          </div>
+          <div class="input-group">
+            <select id="add-exempt-channel" class="form-select">
+              <option value="">-- Select channel --</option>
+              <% channels.forEach(ch => { %>
+                <% if (!exemptChannels.includes(ch.id)) { %>
+                  <option value="<%= ch.id %>">#<%= ch.name %></option>
+                <% } %>
+              <% }); %>
+            </select>
+            <button type="button" class="btn btn-outline-primary"
+                    onclick="addExemptChannel('<%= guild.id %>')">Add</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="d-flex align-items-center gap-2 mt-3 mb-0">
+        <h4 class="mb-0"><i class="bi bi-chat-quote"></i> Custom Messages</h4>
+        <button type="button" class="btn btn-sm btn-outline-info rounded-circle p-0 d-flex align-items-center justify-content-center" style="width: 24px; height: 24px;"
+                data-bs-toggle="popover" data-bs-trigger="focus" data-bs-html="true" data-bs-placement="right"
+                data-bs-title="Variables & Formatting"
+                data-bs-content="<strong>Variables</strong><br><code>{user}</code> &mdash; user mention<br><code>{count}</code> &mdash; warning count<br><br><strong>Formatting</strong><br><code>**bold**</code><br><code>*italic*</code><br><code>__underline__</code><br><code>~~strikethrough~~</code><br><code>&lt;#channel_id&gt;</code> &mdash; channel link">
+          <i class="bi bi-info" style="font-size: 14px;"></i>
+        </button>
+      </div>
+      <p class="text-muted small">Customize the messages the bot sends. Leave blank to use the default.</p>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start">
+            <h5 class="card-title">First Crosspost Message</h5>
+            <span class="badge bg-secondary"><code class="text-light">{user}</code></span>
+          </div>
+          <p class="card-text text-muted small">Sent when a user crossposts for the first time.</p>
+          <textarea name="crosspost_first_message" class="form-control" rows="3"
+                    placeholder="{user}, please do not crosspost the same message across multiple channels. Use the channel that best fits your topic. Duplicate messages have been removed."><%= settings.crosspost_first_message || '' %></textarea>
+          <a href="#" class="small text-muted mt-1 d-inline-block reset-default" data-target="crosspost_first_message">Reset to default</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start">
+            <h5 class="card-title">Repeat Crosspost Message</h5>
+            <div class="d-flex gap-1">
+              <span class="badge bg-secondary">
+                <code class="text-light">{user}</code>
+              </span>
+              <span class="badge bg-secondary">
+                <code class="text-light">{count}</code>
+              </span>
+            </div>
+
+          </div>
+          <p class="card-text text-muted small">Sent on repeat offenses with an auto-warning.</p>
+          <textarea name="crosspost_repeat_message" class="form-control" rows="3"
+                    placeholder="{user}, you have repeatedly crossposted the same message across multiple channels. This is an official warning (warning #{count}). Continued violations may result in a ban.
+Please review the channel list and post in the most appropriate channel moving forward."><%= settings.crosspost_repeat_message || '' %></textarea>
+          <a href="#" class="small text-muted mt-1 d-inline-block reset-default" data-target="crosspost_repeat_message">Reset to default</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start">
+            <h5 class="card-title">Public Warning Message</h5>
+            <span class="badge bg-secondary"><code class="text-light">{user}</code></span>
+          </div>
+          <p class="card-text text-muted small">Sent publicly when a moderator issues a /warn.</p>
+          <textarea name="warn_public_message" class="form-control" rows="3"
+                    placeholder="{user}, you have received an official warning."><%= settings.warn_public_message || '' %></textarea>
+          <a href="#" class="small text-muted mt-1 d-inline-block reset-default" data-target="warn_public_message">Reset to default</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-4">
+    <button type="submit" class="btn btn-primary btn-lg">
+      <i class="bi bi-check-lg"></i> Save Settings
+    </button>
+  </div>
+</form>
+
+<%- footer %>

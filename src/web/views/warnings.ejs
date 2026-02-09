@@ -1,0 +1,79 @@
+<%- header %>
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/dashboard">Servers</a></li>
+    <li class="breadcrumb-item"><a href="/dashboard/guild/<%= guild.id %>"><%= guild.name %></a></li>
+    <li class="breadcrumb-item active">Warnings</li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2>Warnings (<%= total %>)</h2>
+</div>
+
+<div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3"></div>
+
+<% if (warnings.length === 0) { %>
+  <div class="alert alert-success">
+    <i class="bi bi-check-circle"></i> No warnings recorded for this server.
+  </div>
+<% } else { %>
+  <div class="table-responsive">
+    <table class="table table-dark table-striped table-hover">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>User ID</th>
+          <th>Reason</th>
+          <th>Type</th>
+          <th>Issued By</th>
+          <th>Date</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% warnings.forEach(w => { %>
+          <tr id="warning-row-<%= w.id %>">
+            <td><%= w.id %></td>
+            <td><code><%= w.user_id %></code></td>
+            <td><%= w.reason %></td>
+            <td>
+              <span class="badge <%= w.type === 'crosspost' ? 'bg-warning text-dark' : 'bg-info' %>">
+                <%= w.type %>
+              </span>
+            </td>
+            <td><code><%= w.moderator_id %></code></td>
+            <td><%= new Date(w.created_at + 'Z').toLocaleString() %></td>
+            <td>
+              <button class="btn btn-outline-danger btn-sm"
+                      onclick="deleteWarning('<%= guild.id %>', '<%= w.id %>')">
+                <i class="bi bi-trash"></i>
+              </button>
+            </td>
+          </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (totalPages > 1) { %>
+    <nav aria-label="Warnings pagination">
+      <ul class="pagination justify-content-center">
+        <li class="page-item <%= page <= 1 ? 'disabled' : '' %>">
+          <a class="page-link" href="?page=<%= page - 1 %>">Previous</a>
+        </li>
+        <% for (let p = 1; p <= totalPages; p++) { %>
+          <li class="page-item <%= p === page ? 'active' : '' %>">
+            <a class="page-link" href="?page=<%= p %>"><%= p %></a>
+          </li>
+        <% } %>
+        <li class="page-item <%= page >= totalPages ? 'disabled' : '' %>">
+          <a class="page-link" href="?page=<%= page + 1 %>">Next</a>
+        </li>
+      </ul>
+    </nav>
+  <% } %>
+<% } %>
+
+<%- footer %>
