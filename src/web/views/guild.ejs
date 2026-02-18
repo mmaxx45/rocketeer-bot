@@ -129,6 +129,23 @@
     <div class="col-md-6">
       <div class="card bg-dark border-secondary">
         <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-hammer"></i> Ban Log Channel</h5>
+          <p class="card-text text-muted small">Channel where bans triggered by the warning system are logged. Set to "Disabled" to turn off.</p>
+          <select name="ban_log_channel_id" class="form-select">
+            <option value="">-- Disabled --</option>
+            <% channels.forEach(ch => { %>
+              <option value="<%= ch.id %>" <%= settings.ban_log_channel_id === ch.id ? 'selected' : '' %>>
+                #<%= ch.name %>
+              </option>
+            <% }); %>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
           <h5 class="card-title"><i class="bi bi-hash"></i> Exempt Channels</h5>
           <p class="card-text text-muted small">Messages in these channels are not checked for crossposts.</p>
           <div class="d-flex flex-wrap gap-2 mb-3" id="exempt-channels-list">

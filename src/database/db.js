@@ -99,6 +99,12 @@ function runMigrations() {
     db.pragma('user_version = 5');
   }
 
+  if (version < 6) {
+    logger.info('Running database migration v6: add ban_log_channel_id');
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN ban_log_channel_id TEXT DEFAULT NULL`);
+    db.pragma('user_version = 6');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

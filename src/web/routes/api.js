@@ -33,7 +33,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, warn_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -65,6 +65,9 @@ module.exports = function (client) {
       }
       if (warn_log_channel_id !== undefined) {
         updateSetting(guildId, 'warn_log_channel_id', warn_log_channel_id || null);
+      }
+      if (ban_log_channel_id !== undefined) {
+        updateSetting(guildId, 'ban_log_channel_id', ban_log_channel_id || null);
       }
       if (warn_role_id !== undefined) {
         updateSetting(guildId, 'warn_role_id', warn_role_id || null);

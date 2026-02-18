@@ -2,7 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFl
 const logger = require('../../logger');
 const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
-const { canWarn, isExempt } = require('../utils/permissions');
+const { canWarn, isExempt, isModerator } = require('../utils/permissions');
 const { storePendingAction, getPendingAction, deletePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
 
@@ -11,13 +11,22 @@ async function handleButton(interaction) {
 
   if (action === 'view_warnings') {
     const targetUserId = params[0];
+    const settings = getSettings(interaction.guild.id);
+    const modViewing = isModerator(interaction.member, settings);
 
-    if (interaction.user.id !== targetUserId) {
+    if (interaction.user.id !== targetUserId && !modViewing) {
       return interaction.reply({ content: 'This button is not for you.', ephemeral: true });
     }
 
+    let targetUser;
+    try {
+      targetUser = await interaction.client.users.fetch(targetUserId);
+    } catch {
+      targetUser = { id: targetUserId, tag: `Unknown (${targetUserId})`, username: `Unknown (${targetUserId})` };
+    }
+
     const warnings = getWarnings(interaction.guild.id, targetUserId);
-    const embed = buildWarningsEmbed(warnings, interaction.user, interaction.guild);
+    const embed = buildWarningsEmbed(warnings, targetUser, interaction.guild, modViewing);
 
     return interaction.reply({ embeds: [embed], ephemeral: true });
   }
@@ -45,6 +54,30 @@ async function handleButton(interaction) {
         embeds: [],
         components: [],
       });
+
+      const settings = getSettings(interaction.guild.id);
+      if (settings.ban_log_channel_id) {
+        try {
+          const logChannel = await interaction.guild.channels.fetch(settings.ban_log_channel_id);
+          if (logChannel) {
+            const { getWarnings } = require('../../database/warnings');
+            const warnings = getWarnings(interaction.guild.id, pending.targetId);
+            const logEmbed = new EmbedBuilder()
+              .setTitle('User Banned')
+              .setColor(0xFF0000)
+              .addFields(
+                { name: 'User', value: `<@${pending.targetId}> (${pending.targetId})`, inline: true },
+                { name: 'Banned by', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'Total Warnings', value: `${warnings.length}`, inline: true },
+                { name: 'Reason', value: pending.reason },
+              )
+              .setTimestamp();
+            await logChannel.send({ embeds: [logEmbed] });
+          }
+        } catch (err) {
+          logger.warn(`Failed to post to ban log channel: ${err.message}`);
+        }
+      }
     } catch (err) {
       logger.error(`Failed to ban user ${pending.targetId}:`, err);
       await interaction.reply({ content: `Failed to ban user: ${err.message}`, ephemeral: true });

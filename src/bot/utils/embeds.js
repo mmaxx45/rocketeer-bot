@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 
-function buildWarningsEmbed(warnings, user, guild) {
+function buildWarningsEmbed(warnings, user, guild, showModerator = true) {
   const displayName = user.tag || user.username || `User ${user.id}`;
   const embed = new EmbedBuilder()
     .setTitle(`Warnings for ${displayName}`)
@@ -17,7 +17,8 @@ function buildWarningsEmbed(warnings, user, guild) {
       year: 'numeric', month: 'short', day: 'numeric',
     });
     const type = w.type === 'crosspost' ? 'Crosspost' : 'Manual';
-    return `**${i + 1}.** ${date} | ${type} | By <@${w.moderator_id}> | ${w.reason}`;
+    const modPart = showModerator ? ` | By <@${w.moderator_id}>` : '';
+    return `**${i + 1}.** ${date} | ${type}${modPart} | ${w.reason}`;
   });
 
   const chunk = lines.join('\n');

@@ -6,7 +6,7 @@ function getStmts() {
   if (!stmts) {
     stmts = {
       addWarning: db.prepare(`INSERT INTO warnings (guild_id, user_id, moderator_id, reason, type) VALUES (?, ?, ?, ?, ?)`),
-      getWarnings: db.prepare(`SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC`),
+      getWarnings: db.prepare(`SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? ORDER BY created_at ASC`),
       getWarningCount: db.prepare(`SELECT COUNT(*) as count FROM warnings WHERE guild_id = ? AND user_id = ?`),
       getRecentWarnings: db.prepare(`SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? AND created_at > datetime('now', '-' || ? || ' hours') ORDER BY created_at DESC`),
       getAllGuildWarnings: db.prepare(`SELECT * FROM warnings WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`),
