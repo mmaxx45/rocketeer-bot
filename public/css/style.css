@@ -973,6 +973,33 @@ textarea.form-control {
   border: 1px solid var(--border-primary);
 }
 
+.user-id-copy {
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.user-id-copy:hover {
+  border-color: var(--accent-blurple);
+  color: var(--text-primary);
+}
+
+
+.user-display {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0.15em 0.5em;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.user-display:hover {
+  background: var(--accent-blurple-glow);
+  color: var(--accent-blurple);
+}
+
 /* ===== Reset Link ===== */
 .reset-default {
   color: var(--text-muted) !important;

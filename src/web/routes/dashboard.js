@@ -18,6 +18,26 @@ function userCanManageGuild(user, guildId) {
   return (permissions & MANAGE_GUILD) === MANAGE_GUILD;
 }
 
+async function resolveUserNames(botGuild, userIds) {
+  const map = {};
+  const unique = [...new Set(userIds.filter(Boolean))];
+  await Promise.all(unique.map(async (id) => {
+    try {
+      const member = botGuild.members.cache.get(id) || await botGuild.members.fetch(id).catch(() => null);
+      if (member) {
+        map[id] = member.user.username;
+      } else {
+        // Try fetching as a user (may have left the guild)
+        const user = client.users.cache.get(id) || await client.users.fetch(id).catch(() => null);
+        if (user) map[id] = user.username;
+      }
+    } catch {
+      // leave unmapped
+    }
+  }));
+  return map;
+}
+
 module.exports = function (client) {
   const router = express.Router();
   router.use(ensureAuthenticated);
@@ -86,7 +106,7 @@ module.exports = function (client) {
   });
 
   // Warnings page
-  router.get('/guild/:guildId/warnings', (req, res) => {
+  router.get('/guild/:guildId/warnings', async (req, res) => {
     const { guildId } = req.params;
 
     if (!userCanManageGuild(req.user, guildId)) {
@@ -103,6 +123,9 @@ module.exports = function (client) {
     const { rows: warnings, total } = getAllGuildWarnings(guildId, limit, offset);
     const totalPages = Math.ceil(total / limit);
 
+    const allIds = warnings.flatMap(w => [w.user_id, w.moderator_id]);
+    const userMap = await resolveUserNames(botGuild, allIds);
+
     const guild = { id: botGuild.id, name: botGuild.name, icon: botGuild.iconURL() };
     res.render('warnings', {
       user: req.user,
@@ -112,11 +135,12 @@ module.exports = function (client) {
       page,
       totalPages,
       total,
+      userMap,
     });
   });
 
   // Stats page
-  router.get('/guild/:guildId/stats', (req, res) => {
+  router.get('/guild/:guildId/stats', async (req, res) => {
     const { guildId } = req.params;
 
     if (!userCanManageGuild(req.user, guildId)) {
@@ -177,12 +201,20 @@ module.exports = function (client) {
       LIMIT 10
     `).all(guildId);
 
+    const allIds = [
+      ...mostWarnedUsers.map(u => u.user_id),
+      ...mostActiveMods.map(m => m.moderator_id),
+      ...recentActivity.flatMap(a => [a.moderator_id, a.target_id]),
+    ];
+    const userMap = await resolveUserNames(botGuild, allIds);
+
     const guild = { id: botGuild.id, name: botGuild.name, icon: botGuild.iconURL() };
     res.render('stats', {
       user: req.user,
       guild,
       title: guild.name + ' - Statistics',
       botId,
+      userMap,
       stats: {
         totalWarnings,
         totalBans,

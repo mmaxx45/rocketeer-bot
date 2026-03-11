@@ -76,7 +76,7 @@
           <% warnings.forEach(w => { %>
             <tr id="warning-row-<%= w.id %>">
               <td><span style="color: var(--text-muted);">#</span><%= w.id %></td>
-              <td><span class="user-id-cell"><%= w.user_id %></span></td>
+              <td><% if (userMap[w.user_id]) { %><span class="user-display" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= w.user_id %>')">@<%= userMap[w.user_id] %></span><% } else { %><span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= w.user_id %>')"><%= w.user_id %></span><% } %></td>
               <td style="max-width: 280px;"><%= w.reason %></td>
               <td style="max-width: 200px;">
                 <% if (w.message_content) { %>
@@ -91,7 +91,7 @@
                   <%= w.type %>
                 </span>
               </td>
-              <td><span class="user-id-cell"><%= w.moderator_id %></span></td>
+              <td><% if (userMap[w.moderator_id]) { %><span class="user-display" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= w.moderator_id %>')">@<%= userMap[w.moderator_id] %></span><% } else { %><span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= w.moderator_id %>')"><%= w.moderator_id %></span><% } %></td>
               <td style="white-space: nowrap; color: var(--text-secondary); font-size: 0.85rem;">
                 <%= new Date(w.created_at + 'Z').toLocaleString() %>
               </td>
