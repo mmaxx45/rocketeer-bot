@@ -224,12 +224,10 @@ module.exports = function (client) {
       `).all(guildId);
 
       const mostActiveMods = db.prepare(`
-        SELECT moderator_id, COUNT(*) as count FROM (
-          SELECT moderator_id FROM warnings WHERE guild_id = ?
-          UNION ALL
-          SELECT moderator_id FROM mod_actions WHERE guild_id = ?
-        ) GROUP BY moderator_id ORDER BY count DESC LIMIT 10
-      `).all(guildId, guildId);
+        SELECT moderator_id, COUNT(*) as count FROM mod_actions
+        WHERE guild_id = ?
+        GROUP BY moderator_id ORDER BY count DESC LIMIT 10
+      `).all(guildId);
 
       const warningReasons = db.prepare(`
         SELECT reason, COUNT(*) as count FROM warnings

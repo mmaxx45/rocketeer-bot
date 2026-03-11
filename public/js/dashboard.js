@@ -5,14 +5,13 @@ function showToast(message, type = 'success') {
   const id = 'toast-' + Date.now();
   const bgClass = type === 'success' ? 'bg-success' : 'bg-danger';
 
-  container.insertAdjacentHTML('beforeend', `
-    <div id="${id}" class="toast align-items-center text-white ${bgClass} border-0" role="alert">
-      <div class="d-flex">
-        <div class="toast-body">${message}</div>
-        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-      </div>
-    </div>
-  `);
+  const toastDiv = document.createElement('div');
+  toastDiv.id = id;
+  toastDiv.className = `toast align-items-center text-white ${bgClass} border-0`;
+  toastDiv.setAttribute('role', 'alert');
+  toastDiv.innerHTML = `<div class="d-flex"><div class="toast-body"></div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+  toastDiv.querySelector('.toast-body').textContent = message;
+  container.appendChild(toastDiv);
 
   const toastEl = document.getElementById(id);
   const toast = new bootstrap.Toast(toastEl, { delay: 3000 });

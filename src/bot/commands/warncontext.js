@@ -1,10 +1,9 @@
-const { ApplicationCommandType, ContextMenuCommandBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+const { ApplicationCommandType, ContextMenuCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 
 module.exports = {
   data: new ContextMenuCommandBuilder()
     .setName('Warn User')
-    .setType(ApplicationCommandType.Message)
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    .setType(ApplicationCommandType.Message),
 
   async execute(interaction) {
     const targetMessage = interaction.targetMessage;
@@ -27,7 +26,18 @@ module.exports = {
       .setRequired(false)
       .setMaxLength(1024);
 
-    modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+    const timeoutInput = new TextInputBuilder()
+      .setCustomId('timeout')
+      .setLabel('Timeout (optional)')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('e.g. 30s, 5m, 1h, 2d, 1w')
+      .setRequired(false)
+      .setMaxLength(20);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(reasonInput),
+      new ActionRowBuilder().addComponents(timeoutInput),
+    );
 
     await interaction.showModal(modal);
   },

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { getWarnings } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { canBan, isExempt } = require('../utils/permissions');
@@ -22,8 +22,7 @@ module.exports = {
         .setMinValue(0)
         .setMaxValue(7)
         .setRequired(false)
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+    ),
 
   async execute(interaction) {
     const settings = getSettings(interaction.guild.id);

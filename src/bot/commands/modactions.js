@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getSettings } = require('../../database/settings');
 const { getModActions } = require('../../database/modactions');
 const { canViewModActions } = require('../utils/permissions');
@@ -60,8 +60,7 @@ module.exports = {
     )
     .addIntegerOption(opt =>
       opt.setName('page').setDescription('Page number').setRequired(false)
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    ),
 
   async execute(interaction) {
     const settings = getSettings(interaction.guild.id);

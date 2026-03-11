@@ -6,6 +6,7 @@ const { addModAction } = require('../../database/modactions');
 const { canWarn, canBan, isExempt, isModerator, canViewModActions } = require('../utils/permissions');
 const { storePendingAction, getPendingAction, deletePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
+const { parseDuration, formatDuration } = require('../utils/parseDuration');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
 
 const DEFAULT_WARN_REASONS = [
@@ -81,7 +82,6 @@ async function handleButton(interaction) {
         try {
           const logChannel = await interaction.guild.channels.fetch(settings.ban_log_channel_id);
           if (logChannel) {
-            const { getWarnings } = require('../../database/warnings');
             const warnings = getWarnings(interaction.guild.id, pending.targetId);
             const logEmbed = new EmbedBuilder()
               .setTitle('User Banned')
@@ -523,7 +523,14 @@ async function handleModalSubmit(interaction) {
 
   const [, targetUserId, messageId, channelId] = interaction.customId.split(':');
   const reason = interaction.fields.getTextInputValue('reason') || 'No reason provided';
+  const timeoutInput = interaction.fields.getTextInputValue('timeout') || null;
+  const timeoutMs = timeoutInput ? parseDuration(timeoutInput) : null;
+  const timeoutLabel = timeoutMs ? formatDuration(timeoutMs) : null;
   const settings = getSettings(interaction.guild.id);
+
+  if (timeoutInput && !timeoutMs) {
+    return interaction.reply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.', ephemeral: true });
+  }
 
   if (!canWarn(interaction.member, settings)) {
     return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
@@ -580,6 +587,8 @@ async function handleModalSubmit(interaction) {
       messageId,
       channelId,
       messageContent,
+      timeoutMs,
+      timeoutLabel,
     });
 
     const buttons = [];
@@ -621,8 +630,34 @@ async function handleModalSubmit(interaction) {
     logger.warn(`Failed to log mod action: ${err.message}`);
   }
 
+  // Apply timeout if specified
+  let timeoutApplied = false;
+  let timeoutError = null;
+  if (timeoutMs) {
+    try {
+      const member = await interaction.guild.members.fetch(targetUserId);
+      await member.timeout(timeoutMs, `Warning by ${interaction.user.tag}: ${reason}`);
+      timeoutApplied = true;
+      try {
+        addModAction(interaction.guild.id, interaction.user.id, 'timeout', targetUserId, `${timeoutLabel} — ${reason}`);
+      } catch (err) {
+        logger.warn(`Failed to log timeout mod action: ${err.message}`);
+      }
+    } catch (err) {
+      logger.warn(`Failed to timeout user ${targetUserId}: ${err.message}`);
+      timeoutError = err.message;
+    }
+  }
+
+  let replyContent = `Warning issued to <@${targetUserId}> (now has ${newCount} total warning(s)).\n**Reason:** ${reason}`;
+  if (timeoutApplied) {
+    replyContent += `\n**Timeout:** ${timeoutLabel}`;
+  } else if (timeoutError) {
+    replyContent += `\n**Timeout failed:** ${timeoutError}`;
+  }
+
   await interaction.reply({
-    content: `Warning issued to <@${targetUserId}> (now has ${newCount} total warning(s)).\n**Reason:** ${reason}`,
+    content: replyContent,
     ephemeral: true,
   });
 
@@ -664,6 +699,12 @@ async function handleModalSubmit(interaction) {
             { name: 'Reason', value: reason },
           )
           .setTimestamp();
+
+        if (timeoutApplied) {
+          logEmbed.addFields({ name: 'Timeout', value: timeoutLabel, inline: true });
+        } else if (timeoutError) {
+          logEmbed.addFields({ name: 'Timeout', value: `Failed: ${timeoutError}`, inline: true });
+        }
 
         // Fetch and include the original message content
         try {

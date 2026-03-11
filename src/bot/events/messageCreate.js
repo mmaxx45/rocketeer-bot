@@ -195,7 +195,11 @@ async function handleDM(message) {
         .setEmoji('\uD83D\uDD12'),
     );
 
-    await modmailChannel.send({ embeds: [infoEmbed], components: [closeButton] });
+    const modmailOpenMsg = { embeds: [infoEmbed], components: [closeButton] };
+    if (targetSettings.moderator_role_id) {
+      modmailOpenMsg.content = `<@&${targetSettings.moderator_role_id}> New modmail received`;
+    }
+    await modmailChannel.send(modmailOpenMsg);
 
     // Send the user's message
     const msgEmbed = new EmbedBuilder()
@@ -527,6 +531,12 @@ module.exports = {
           if (kickMember.kickable) {
             await kickMember.kick(`Auto-kicked: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
             logger.info(`Auto-kicked user ${message.author.tag} from ${guildId}: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
+
+            try {
+              addModAction(guildId, message.client.user.id, 'kick', message.author.id, `Auto-kicked: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
+            } catch (err) {
+              logger.warn(`Failed to log kick mod action: ${err.message}`);
+            }
 
             try {
               await message.channel.send({
