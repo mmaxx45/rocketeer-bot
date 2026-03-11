@@ -18,23 +18,56 @@ function userCanManageGuild(user, guildId) {
   return (permissions & MANAGE_GUILD) === MANAGE_GUILD;
 }
 
+// In-memory username cache: id -> { name, ts }
+const userNameCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 async function resolveUserNames(botGuild, userIds) {
   const map = {};
+  const now = Date.now();
   const unique = [...new Set(userIds.filter(Boolean))];
-  await Promise.all(unique.map(async (id) => {
-    try {
-      const member = botGuild.members.cache.get(id) || await botGuild.members.fetch(id).catch(() => null);
-      if (member) {
-        map[id] = member.user.username;
-      } else {
-        // Try fetching as a user (may have left the guild)
-        const user = client.users.cache.get(id) || await client.users.fetch(id).catch(() => null);
-        if (user) map[id] = user.username;
-      }
-    } catch {
-      // leave unmapped
+  const uncached = [];
+
+  // Check cache and guild member cache first (no API calls)
+  for (const id of unique) {
+    const cached = userNameCache.get(id);
+    if (cached && now - cached.ts < CACHE_TTL) {
+      map[id] = cached.name;
+      continue;
     }
-  }));
+    const member = botGuild.members.cache.get(id);
+    if (member) {
+      map[id] = member.user.username;
+      userNameCache.set(id, { name: member.user.username, ts: now });
+      continue;
+    }
+    uncached.push(id);
+  }
+
+  if (uncached.length === 0) return map;
+
+  // Batch-fetch guild members in one API call
+  try {
+    const fetched = await botGuild.members.fetch({ user: uncached });
+    for (const [id, member] of fetched) {
+      map[id] = member.user.username;
+      userNameCache.set(id, { name: member.user.username, ts: now });
+    }
+  } catch {
+    // partial failure is fine
+  }
+
+  // For any still missing (left the guild), check client user cache only — no extra API calls
+  for (const id of uncached) {
+    if (!map[id]) {
+      const user = botGuild.client.users.cache.get(id);
+      if (user) {
+        map[id] = user.username;
+        userNameCache.set(id, { name: user.username, ts: now });
+      }
+    }
+  }
+
   return map;
 }
 
