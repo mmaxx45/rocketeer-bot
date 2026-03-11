@@ -129,8 +129,34 @@ async function handleButton(interaction) {
       logger.warn(`Failed to log mod action: ${err.message}`);
     }
 
+    // Apply timeout if specified
+    let timeoutApplied = false;
+    let timeoutError = null;
+    if (pending.timeoutMs) {
+      try {
+        const member = await interaction.guild.members.fetch(pending.targetId);
+        await member.timeout(pending.timeoutMs, `Warning by ${interaction.user.tag}: ${pending.reason}`);
+        timeoutApplied = true;
+        try {
+          addModAction(interaction.guild.id, pending.moderatorId, 'timeout', pending.targetId, `${pending.timeoutLabel} — ${pending.reason}`);
+        } catch (err) {
+          logger.warn(`Failed to log timeout mod action: ${err.message}`);
+        }
+      } catch (err) {
+        logger.warn(`Failed to timeout user ${pending.targetId}: ${err.message}`);
+        timeoutError = err.message;
+      }
+    }
+
+    let updateContent = `Warning issued to <@${pending.targetId}> (now has ${newCount} total warning(s)).\n**Reason:** ${pending.reason}`;
+    if (timeoutApplied) {
+      updateContent += `\n**Timeout:** ${pending.timeoutLabel}`;
+    } else if (timeoutError) {
+      updateContent += `\n**Timeout failed:** ${timeoutError}`;
+    }
+
     await interaction.update({
-      content: `Warning issued to <@${pending.targetId}> (now has ${newCount} total warning(s)).\n**Reason:** ${pending.reason}`,
+      content: updateContent,
       embeds: [],
       components: [],
     });
@@ -171,6 +197,12 @@ async function handleButton(interaction) {
               { name: 'Reason', value: pending.reason },
             )
             .setTimestamp();
+
+          if (timeoutApplied) {
+            logEmbed.addFields({ name: 'Timeout', value: pending.timeoutLabel, inline: true });
+          } else if (timeoutError) {
+            logEmbed.addFields({ name: 'Timeout', value: `Failed: ${timeoutError}`, inline: true });
+          }
 
           // If this came from context menu warn, include the message
           if (pending.messageId && pending.channelId) {

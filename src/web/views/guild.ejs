@@ -14,9 +14,14 @@
     <% } %>
     <h2><%= guild.name %></h2>
   </div>
-  <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
-    <i class="bi bi-exclamation-triangle"></i> View Warnings
-  </a>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
+      <i class="bi bi-exclamation-triangle"></i> View Warnings
+    </a>
+    <a href="/dashboard/guild/<%= guild.id %>/stats" class="btn btn-outline-info">
+      <i class="bi bi-bar-chart-line"></i> Stats
+    </a>
+  </div>
 </div>
 
 <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3"></div>

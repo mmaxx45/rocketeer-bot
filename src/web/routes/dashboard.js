@@ -1,6 +1,7 @@
 const express = require('express');
 const { getSettings, getExemptChannels } = require('../../database/settings');
 const { getAllGuildWarnings } = require('../../database/warnings');
+const { db } = require('../../database/db');
 
 const MANAGE_GUILD = BigInt(0x20);
 
@@ -111,6 +112,106 @@ module.exports = function (client) {
       page,
       totalPages,
       total,
+    });
+  });
+
+  // Stats page
+  router.get('/guild/:guildId/stats', (req, res) => {
+    const { guildId } = req.params;
+
+    if (!userCanManageGuild(req.user, guildId)) {
+      return res.status(403).send('Forbidden');
+    }
+
+    const botGuild = client.guilds.cache.get(guildId);
+    if (!botGuild) return res.status(404).send('Bot is not in this guild');
+
+    // Total warnings
+    const totalWarnings = db.prepare('SELECT COUNT(*) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
+
+    // Total bans
+    const totalBans = db.prepare("SELECT COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND action_type = 'ban'").get(guildId).count;
+
+    // Total crosspost incidents
+    const totalCrosspostIncidents = db.prepare('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?').get(guildId).count;
+
+    // Active moderators (distinct mods who issued warnings)
+    const activeMods = db.prepare('SELECT COUNT(DISTINCT moderator_id) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
+
+    // Warnings over time (last 8 weeks)
+    const warningsOverTime = [];
+    for (let i = 7; i >= 0; i--) {
+      const row = db.prepare(`
+        SELECT COUNT(*) as count FROM warnings
+        WHERE guild_id = ?
+          AND created_at >= datetime('now', ? || ' days')
+          AND created_at < datetime('now', ? || ' days')
+      `).get(guildId, String(-i * 7), String(-(i - 1) * 7));
+
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - i * 7);
+      const month = weekStart.toLocaleString('en-US', { month: 'short' });
+      const day = weekStart.getDate();
+      warningsOverTime.push({
+        label: `${month} ${day}`,
+        count: row.count,
+      });
+    }
+
+    // Most warned users (top 10)
+    const mostWarnedUsers = db.prepare(`
+      SELECT user_id, COUNT(*) as count FROM warnings
+      WHERE guild_id = ?
+      GROUP BY user_id
+      ORDER BY count DESC
+      LIMIT 10
+    `).all(guildId);
+
+    // Most active moderators (top 10, combining warnings + mod_actions)
+    const mostActiveMods = db.prepare(`
+      SELECT moderator_id, COUNT(*) as count FROM (
+        SELECT moderator_id FROM warnings WHERE guild_id = ?
+        UNION ALL
+        SELECT moderator_id FROM mod_actions WHERE guild_id = ?
+      )
+      GROUP BY moderator_id
+      ORDER BY count DESC
+      LIMIT 10
+    `).all(guildId, guildId);
+
+    // Warning reasons breakdown
+    const warningReasons = db.prepare(`
+      SELECT reason, COUNT(*) as count FROM warnings
+      WHERE guild_id = ?
+      GROUP BY reason
+      ORDER BY count DESC
+      LIMIT 15
+    `).all(guildId);
+
+    // Recent activity (last 10 mod actions)
+    const recentActivity = db.prepare(`
+      SELECT * FROM mod_actions
+      WHERE guild_id = ?
+      ORDER BY created_at DESC
+      LIMIT 10
+    `).all(guildId);
+
+    const guild = { id: botGuild.id, name: botGuild.name, icon: botGuild.iconURL() };
+    res.render('stats', {
+      user: req.user,
+      guild,
+      title: guild.name + ' - Statistics',
+      stats: {
+        totalWarnings,
+        totalBans,
+        totalCrosspostIncidents,
+        activeMods,
+        warningsOverTime,
+        mostWarnedUsers,
+        mostActiveMods,
+        warningReasons,
+        recentActivity,
+      },
     });
   });
 

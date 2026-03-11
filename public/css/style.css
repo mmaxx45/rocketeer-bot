@@ -1111,6 +1111,225 @@ textarea.form-control {
 .animate-in:nth-child(7) { animation-delay: 0.21s; }
 .animate-in:nth-child(8) { animation-delay: 0.24s; }
 
+/* ===== Stats Page: Bar Charts ===== */
+.stats-bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.bar-chart-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.bar-chart-label {
+  width: 70px;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-chart-label-wide {
+  width: 180px;
+}
+
+.bar-chart-track {
+  flex: 1;
+  height: 24px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-primary);
+  overflow: hidden;
+}
+
+.bar-chart-fill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  min-width: 2px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bar-fill-blurple {
+  background: linear-gradient(90deg, var(--accent-blurple), #7289da);
+}
+
+.bar-fill-yellow {
+  background: linear-gradient(90deg, rgba(254, 231, 92, 0.7), var(--accent-yellow));
+}
+
+.bar-fill-green {
+  background: linear-gradient(90deg, rgba(87, 242, 135, 0.7), var(--accent-green));
+}
+
+.bar-fill-cyan {
+  background: linear-gradient(90deg, rgba(92, 207, 238, 0.7), var(--accent-cyan));
+}
+
+.bar-fill-red {
+  background: linear-gradient(90deg, rgba(237, 66, 69, 0.7), var(--accent-red));
+}
+
+.bar-chart-value {
+  width: 40px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* ===== Stats Page: Ranked Lists ===== */
+.stats-ranked-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ranked-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.ranked-position {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border-radius: 50%;
+  border: 1px solid var(--border-primary);
+}
+
+.ranked-item:nth-child(1) .ranked-position {
+  color: var(--accent-yellow);
+  border-color: rgba(254, 231, 92, 0.3);
+  background: var(--accent-yellow-dim);
+}
+
+.ranked-item:nth-child(2) .ranked-position {
+  color: var(--text-secondary);
+  border-color: var(--border-hover);
+}
+
+.ranked-item:nth-child(3) .ranked-position {
+  color: #cd7f32;
+  border-color: rgba(205, 127, 50, 0.3);
+}
+
+.ranked-item .user-id-cell {
+  flex-shrink: 0;
+}
+
+.ranked-bar-track {
+  flex: 1;
+  height: 18px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-primary);
+  overflow: hidden;
+  min-width: 40px;
+}
+
+.ranked-count {
+  width: 32px;
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* ===== Stats Page: Action Badges ===== */
+.stats-action-badge {
+  font-weight: 600;
+  font-size: 0.75rem;
+  padding: 0.3em 0.6em;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  white-space: nowrap;
+}
+
+.stats-action-ban {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+  border: 1px solid rgba(237, 66, 69, 0.2);
+}
+
+.stats-action-kick {
+  background: var(--accent-yellow-dim);
+  color: var(--accent-yellow);
+  border: 1px solid rgba(254, 231, 92, 0.2);
+}
+
+.stats-action-warn {
+  background: var(--accent-cyan-dim);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(92, 207, 238, 0.2);
+}
+
+.stats-action-other {
+  background: var(--accent-blurple-glow);
+  color: var(--accent-blurple);
+  border: 1px solid rgba(88, 101, 242, 0.2);
+}
+
+/* ===== Stats Page: Empty Mini ===== */
+.stats-empty-mini {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--text-muted);
+}
+
+.stats-empty-mini i {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: 0.5rem;
+  opacity: 0.5;
+}
+
+.stats-empty-mini p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+/* ===== Stats Page: Responsive ===== */
+@media (max-width: 767.98px) {
+  .bar-chart-label {
+    width: 50px;
+    font-size: 0.72rem;
+  }
+
+  .bar-chart-label-wide {
+    width: 100px;
+  }
+
+  .bar-chart-value {
+    width: 30px;
+    font-size: 0.78rem;
+  }
+
+  .ranked-item .user-id-cell {
+    font-size: 0.72rem;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 /* ===== Mobile Refinements ===== */
 @media (max-width: 767.98px) {
   .login-card {

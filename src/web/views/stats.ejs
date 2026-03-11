@@ -1,0 +1,243 @@
+<%- header %>
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/dashboard">Servers</a></li>
+    <li class="breadcrumb-item"><a href="/dashboard/guild/<%= guild.id %>"><%= guild.name %></a></li>
+    <li class="breadcrumb-item active">Statistics</li>
+  </ol>
+</nav>
+
+<div class="guild-page-header mb-4">
+  <div class="guild-title">
+    <% if (guild.icon) { %>
+      <img src="<%= guild.icon %>?size=80" class="guild-icon-sm" alt="icon">
+    <% } %>
+    <div>
+      <h2><%= guild.name %></h2>
+      <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Server Statistics</p>
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
+      <i class="bi bi-exclamation-triangle"></i> View Warnings
+    </a>
+    <a href="/dashboard/guild/<%= guild.id %>" class="btn btn-outline-primary">
+      <i class="bi bi-gear"></i> Settings
+    </a>
+  </div>
+</div>
+
+<!-- Overview Cards -->
+<div class="warnings-stats mb-4">
+  <div class="stat-card">
+    <div class="stat-value"><%= stats.totalWarnings %></div>
+    <div class="stat-label">Total Warnings</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value"><%= stats.totalBans %></div>
+    <div class="stat-label">Total Bans</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value"><%= stats.totalCrosspostIncidents %></div>
+    <div class="stat-label">Crosspost Incidents</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value"><%= stats.activeMods %></div>
+    <div class="stat-label">Active Moderators</div>
+  </div>
+</div>
+
+<!-- Warnings Over Time -->
+<div class="settings-section mb-4">
+  <div class="section-header">
+    <i class="bi bi-graph-up"></i>
+    <h5>Warnings Over Time</h5>
+    <span class="ms-auto" style="font-size: 0.78rem; color: var(--text-muted);">Last 8 weeks</span>
+  </div>
+  <div class="section-body">
+    <% if (stats.warningsOverTime.length === 0 || stats.warningsOverTime.every(w => w.count === 0)) { %>
+      <div class="stats-empty-mini">
+        <i class="bi bi-graph-up"></i>
+        <p>No warning data for the last 8 weeks.</p>
+      </div>
+    <% } else { %>
+      <% const maxCount = Math.max(...stats.warningsOverTime.map(w => w.count), 1); %>
+      <div class="stats-bar-chart">
+        <% stats.warningsOverTime.forEach(week => { %>
+          <div class="bar-chart-row">
+            <div class="bar-chart-label"><%= week.label %></div>
+            <div class="bar-chart-track">
+              <div class="bar-chart-fill bar-fill-blurple" style="width: <%= (week.count / maxCount) * 100 %>%"></div>
+            </div>
+            <div class="bar-chart-value"><%= week.count %></div>
+          </div>
+        <% }); %>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<div class="row">
+  <!-- Most Warned Users -->
+  <div class="col-lg-6 mb-4">
+    <div class="settings-section h-100">
+      <div class="section-header">
+        <i class="bi bi-person-exclamation"></i>
+        <h5>Most Warned Users</h5>
+      </div>
+      <div class="section-body">
+        <% if (stats.mostWarnedUsers.length === 0) { %>
+          <div class="stats-empty-mini">
+            <i class="bi bi-person-check"></i>
+            <p>No warnings recorded yet.</p>
+          </div>
+        <% } else { %>
+          <% const maxUserWarnings = stats.mostWarnedUsers[0].count; %>
+          <div class="stats-ranked-list">
+            <% stats.mostWarnedUsers.forEach((user, i) => { %>
+              <div class="ranked-item">
+                <span class="ranked-position"><%= i + 1 %></span>
+                <span class="user-id-cell"><%= user.user_id %></span>
+                <div class="ranked-bar-track">
+                  <div class="bar-chart-fill bar-fill-yellow" style="width: <%= (user.count / maxUserWarnings) * 100 %>%"></div>
+                </div>
+                <span class="ranked-count"><%= user.count %></span>
+              </div>
+            <% }); %>
+          </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <!-- Most Active Moderators -->
+  <div class="col-lg-6 mb-4">
+    <div class="settings-section h-100">
+      <div class="section-header">
+        <i class="bi bi-shield-check"></i>
+        <h5>Most Active Moderators</h5>
+      </div>
+      <div class="section-body">
+        <% if (stats.mostActiveMods.length === 0) { %>
+          <div class="stats-empty-mini">
+            <i class="bi bi-shield"></i>
+            <p>No moderator actions recorded yet.</p>
+          </div>
+        <% } else { %>
+          <% const maxModActions = stats.mostActiveMods[0].count; %>
+          <div class="stats-ranked-list">
+            <% stats.mostActiveMods.forEach((mod, i) => { %>
+              <div class="ranked-item">
+                <span class="ranked-position"><%= i + 1 %></span>
+                <span class="user-id-cell"><%= mod.moderator_id %></span>
+                <div class="ranked-bar-track">
+                  <div class="bar-chart-fill bar-fill-green" style="width: <%= (mod.count / maxModActions) * 100 %>%"></div>
+                </div>
+                <span class="ranked-count"><%= mod.count %></span>
+              </div>
+            <% }); %>
+          </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Warning Reasons Breakdown -->
+<div class="settings-section mb-4">
+  <div class="section-header">
+    <i class="bi bi-tags"></i>
+    <h5>Warning Reasons Breakdown</h5>
+  </div>
+  <div class="section-body">
+    <% if (stats.warningReasons.length === 0) { %>
+      <div class="stats-empty-mini">
+        <i class="bi bi-tags"></i>
+        <p>No warning reasons to display.</p>
+      </div>
+    <% } else { %>
+      <% const maxReasonCount = Math.max(...stats.warningReasons.map(r => r.count), 1); %>
+      <div class="stats-bar-chart">
+        <% stats.warningReasons.forEach(reason => { %>
+          <div class="bar-chart-row">
+            <div class="bar-chart-label bar-chart-label-wide" title="<%= reason.reason %>"><%= reason.reason %></div>
+            <div class="bar-chart-track">
+              <div class="bar-chart-fill bar-fill-cyan" style="width: <%= (reason.count / maxReasonCount) * 100 %>%"></div>
+            </div>
+            <div class="bar-chart-value"><%= reason.count %></div>
+          </div>
+        <% }); %>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="settings-section mb-4">
+  <div class="section-header">
+    <i class="bi bi-clock-history"></i>
+    <h5>Recent Activity</h5>
+  </div>
+  <div class="section-body p-0">
+    <% if (stats.recentActivity.length === 0) { %>
+      <div class="stats-empty-mini" style="padding: 2rem;">
+        <i class="bi bi-clock-history"></i>
+        <p>No recent activity.</p>
+      </div>
+    <% } else { %>
+      <div class="table-responsive">
+        <table class="table table-dark table-striped table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Action</th>
+              <th>Moderator</th>
+              <th>Target</th>
+              <th>Details</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% stats.recentActivity.forEach(action => { %>
+              <tr>
+                <td>
+                  <% if (action.action_type === 'ban') { %>
+                    <span class="stats-action-badge stats-action-ban">
+                      <i class="bi bi-hammer"></i> Ban
+                    </span>
+                  <% } else if (action.action_type === 'kick') { %>
+                    <span class="stats-action-badge stats-action-kick">
+                      <i class="bi bi-door-open"></i> Kick
+                    </span>
+                  <% } else if (action.action_type === 'warn') { %>
+                    <span class="stats-action-badge stats-action-warn">
+                      <i class="bi bi-exclamation-triangle"></i> Warn
+                    </span>
+                  <% } else { %>
+                    <span class="stats-action-badge stats-action-other">
+                      <i class="bi bi-activity"></i> <%= action.action_type %>
+                    </span>
+                  <% } %>
+                </td>
+                <td><span class="user-id-cell"><%= action.moderator_id %></span></td>
+                <td><span class="user-id-cell"><%= action.target_id %></span></td>
+                <td style="max-width: 250px;">
+                  <% if (action.details) { %>
+                    <span class="text-muted" title="<%= action.details %>"><%= action.details.length > 60 ? action.details.slice(0, 60) + '...' : action.details %></span>
+                  <% } else { %>
+                    <span style="color: var(--text-muted);">--</span>
+                  <% } %>
+                </td>
+                <td style="white-space: nowrap; color: var(--text-secondary); font-size: 0.85rem;">
+                  <%= new Date(action.created_at + 'Z').toLocaleString() %>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<%- footer %>

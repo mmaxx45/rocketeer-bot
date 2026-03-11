@@ -193,6 +193,70 @@ module.exports = function (client) {
     }
   });
 
+  // Get guild stats
+  router.get('/guild/:guildId/stats', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+
+    try {
+      const totalWarnings = db.prepare('SELECT COUNT(*) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
+      const totalBans = db.prepare("SELECT COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND action_type = 'ban'").get(guildId).count;
+      const totalCrosspostIncidents = db.prepare('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?').get(guildId).count;
+      const activeMods = db.prepare('SELECT COUNT(DISTINCT moderator_id) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
+
+      const warningsOverTime = [];
+      for (let i = 7; i >= 0; i--) {
+        const row = db.prepare(`
+          SELECT COUNT(*) as count FROM warnings
+          WHERE guild_id = ?
+            AND created_at >= datetime('now', ? || ' days')
+            AND created_at < datetime('now', ? || ' days')
+        `).get(guildId, String(-i * 7), String(-(i - 1) * 7));
+        const weekStart = new Date();
+        weekStart.setDate(weekStart.getDate() - i * 7);
+        const month = weekStart.toLocaleString('en-US', { month: 'short' });
+        const day = weekStart.getDate();
+        warningsOverTime.push({ label: `${month} ${day}`, count: row.count });
+      }
+
+      const mostWarnedUsers = db.prepare(`
+        SELECT user_id, COUNT(*) as count FROM warnings
+        WHERE guild_id = ? GROUP BY user_id ORDER BY count DESC LIMIT 10
+      `).all(guildId);
+
+      const mostActiveMods = db.prepare(`
+        SELECT moderator_id, COUNT(*) as count FROM (
+          SELECT moderator_id FROM warnings WHERE guild_id = ?
+          UNION ALL
+          SELECT moderator_id FROM mod_actions WHERE guild_id = ?
+        ) GROUP BY moderator_id ORDER BY count DESC LIMIT 10
+      `).all(guildId, guildId);
+
+      const warningReasons = db.prepare(`
+        SELECT reason, COUNT(*) as count FROM warnings
+        WHERE guild_id = ? GROUP BY reason ORDER BY count DESC LIMIT 15
+      `).all(guildId);
+
+      const recentActivity = db.prepare(`
+        SELECT * FROM mod_actions WHERE guild_id = ? ORDER BY created_at DESC LIMIT 10
+      `).all(guildId);
+
+      res.json({
+        totalWarnings,
+        totalBans,
+        totalCrosspostIncidents,
+        activeMods,
+        warningsOverTime,
+        mostWarnedUsers,
+        mostActiveMods,
+        warningReasons,
+        recentActivity,
+      });
+    } catch (err) {
+      logger.error('Failed to fetch stats:', err);
+      res.status(500).json({ error: 'Failed to fetch stats' });
+    }
+  });
+
   // Get crosspost incidents
   router.get('/guild/:guildId/incidents', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
