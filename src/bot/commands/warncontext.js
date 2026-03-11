@@ -3,7 +3,8 @@ const { ApplicationCommandType, ContextMenuCommandBuilder, ModalBuilder, TextInp
 module.exports = {
   data: new ContextMenuCommandBuilder()
     .setName('Warn User')
-    .setType(ApplicationCommandType.Message),
+    .setType(ApplicationCommandType.Message)
+    .setDefaultMemberPermissions(null),
 
   async execute(interaction) {
     const targetMessage = interaction.targetMessage;

@@ -20,7 +20,8 @@ module.exports = {
     )
     .addStringOption(opt =>
       opt.setName('timeout').setDescription('Optional timeout: e.g. 30s, 5m, 1h, 2d, 1w, 1mo')
-    ),
+    )
+    .setDefaultMemberPermissions(null),
 
   async execute(interaction) {
     const settings = getSettings(interaction.guild.id);

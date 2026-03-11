@@ -22,7 +22,8 @@ module.exports = {
         .setMinValue(0)
         .setMaxValue(7)
         .setRequired(false)
-    ),
+    )
+    .setDefaultMemberPermissions(null),
 
   async execute(interaction) {
     const settings = getSettings(interaction.guild.id);
