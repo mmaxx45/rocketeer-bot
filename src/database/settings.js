@@ -25,6 +25,7 @@ function getStmts() {
         ban_role_id: db.prepare(`UPDATE guild_settings SET ban_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         modmail_enabled: db.prepare(`UPDATE guild_settings SET modmail_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         modmail_category_id: db.prepare(`UPDATE guild_settings SET modmail_category_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        modactions_role_id: db.prepare(`UPDATE guild_settings SET modactions_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }

@@ -129,6 +129,20 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_modmail_channel ON modmail_threads(channel_id);
       CREATE INDEX IF NOT EXISTS idx_modmail_status ON modmail_threads(status);
     `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mod_actions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        moderator_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mod_actions_guild_mod ON mod_actions(guild_id, moderator_id);
+    `);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN modactions_role_id TEXT DEFAULT NULL`);
     db.pragma('user_version = 7');
   }
 

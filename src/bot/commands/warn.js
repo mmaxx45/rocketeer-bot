@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { addWarning, getWarnings, getWarningCount } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
+const { addModAction } = require('../../database/modactions');
 const { canWarn, isExempt } = require('../utils/permissions');
 const { storePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
@@ -96,6 +97,12 @@ module.exports = {
     // Below threshold - issue directly
     addWarning(interaction.guild.id, targetUser.id, interaction.user.id, reason, 'manual');
     const newCount = getWarningCount(interaction.guild.id, targetUser.id);
+
+    try {
+      addModAction(interaction.guild.id, interaction.user.id, 'warn', targetUser.id, reason);
+    } catch (err) {
+      logger.warn(`Failed to log mod action: ${err.message}`);
+    }
 
     await interaction.reply({
       content: `Warning issued to <@${targetUser.id}> (now has ${newCount} total warning(s)).\n**Reason:** ${reason}`,

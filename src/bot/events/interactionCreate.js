@@ -2,7 +2,8 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFl
 const logger = require('../../logger');
 const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
-const { canWarn, canBan, isExempt, isModerator } = require('../utils/permissions');
+const { addModAction } = require('../../database/modactions');
+const { canWarn, canBan, isExempt, isModerator, canViewModActions } = require('../utils/permissions');
 const { storePendingAction, getPendingAction, deletePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
@@ -49,6 +50,12 @@ async function handleButton(interaction) {
       await member.ban({ reason: `Banned by ${interaction.user.tag}: accumulated warnings` });
 
       deletePendingAction(actionId);
+
+      try {
+        addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, `Banned due to accumulated warnings: ${pending.reason}`);
+      } catch (err) {
+        logger.warn(`Failed to log mod action: ${err.message}`);
+      }
 
       await interaction.update({
         content: `<@${pending.targetId}> has been banned. All warnings have been preserved in the log.`,
@@ -102,6 +109,12 @@ async function handleButton(interaction) {
     const newCount = getWarningCount(interaction.guild.id, pending.targetId);
 
     deletePendingAction(actionId);
+
+    try {
+      addModAction(interaction.guild.id, pending.moderatorId, 'warn', pending.targetId, pending.reason);
+    } catch (err) {
+      logger.warn(`Failed to log mod action: ${err.message}`);
+    }
 
     await interaction.update({
       content: `Warning issued to <@${pending.targetId}> (now has ${newCount} total warning(s)).\n**Reason:** ${pending.reason}`,
@@ -339,6 +352,88 @@ async function handleButton(interaction) {
     }
     return;
   }
+
+  if (action === 'modactions_page') {
+    const targetUserId = params[0];
+    const page = parseInt(params[1], 10);
+    const settings = getSettings(interaction.guild.id);
+
+    if (!canViewModActions(interaction.member, settings)) {
+      return interaction.reply({ content: 'You do not have permission to view mod actions.', ephemeral: true });
+    }
+
+    const { getModActions } = require('../../database/modactions');
+    const PAGE_SIZE = 10;
+    const offset = (page - 1) * PAGE_SIZE;
+
+    const { rows, total } = getModActions(interaction.guild.id, targetUserId, PAGE_SIZE, offset);
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+    let targetUser;
+    try {
+      targetUser = await interaction.client.users.fetch(targetUserId);
+    } catch {
+      targetUser = { id: targetUserId, tag: `Unknown (${targetUserId})`, username: `Unknown (${targetUserId})` };
+    }
+
+    const displayName = targetUser.tag || targetUser.username || `User ${targetUser.id}`;
+    const embed = new EmbedBuilder()
+      .setTitle(`Mod Actions by ${displayName}`)
+      .setColor(0x5865F2)
+      .setTimestamp();
+
+    if (rows.length === 0) {
+      embed.setDescription('No mod actions on record.');
+    } else {
+      const lines = rows.map((a, i) => {
+        const num = (page - 1) * PAGE_SIZE + i + 1;
+        const date = new Date(a.created_at + 'Z').toLocaleDateString('en-US', {
+          year: 'numeric', month: 'short', day: 'numeric',
+        });
+        const details = a.details
+          ? (a.details.length > 80 ? a.details.slice(0, 77) + '...' : a.details)
+          : 'N/A';
+        return `**${num}.** ${date} | \`${a.action_type}\` | Target: <@${a.target_id}> | ${details}`;
+      });
+
+      const chunk = lines.join('\n');
+      if (chunk.length <= 4096) {
+        embed.setDescription(chunk);
+      } else {
+        embed.setDescription(lines.slice(0, 8).join('\n') + `\n\n*...truncated*`);
+      }
+    }
+
+    embed.setFooter({ text: `Page ${page}/${totalPages} | Total: ${total} action(s)` });
+
+    const buttons = [];
+    if (page > 1) {
+      buttons.push(
+        new ButtonBuilder()
+          .setCustomId(`modactions_page:${targetUserId}:${page - 1}`)
+          .setLabel('Previous')
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+    if (page < totalPages) {
+      buttons.push(
+        new ButtonBuilder()
+          .setCustomId(`modactions_page:${targetUserId}:${page + 1}`)
+          .setLabel('Next')
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+
+    const components = buttons.length > 0
+      ? [new ActionRowBuilder().addComponents(buttons)]
+      : [];
+
+    await interaction.update({
+      embeds: [embed],
+      components,
+    });
+    return;
+  }
 }
 
 const DEFAULT_WARN_REASONS = [
@@ -489,6 +584,12 @@ async function handleModalSubmit(interaction) {
   // Below threshold - issue directly
   addWarning(interaction.guild.id, targetUserId, interaction.user.id, reason, 'manual', messageContent);
   const newCount = getWarningCount(interaction.guild.id, targetUserId);
+
+  try {
+    addModAction(interaction.guild.id, interaction.user.id, 'warn', targetUserId, reason);
+  } catch (err) {
+    logger.warn(`Failed to log mod action: ${err.message}`);
+  }
 
   await interaction.reply({
     content: `Warning issued to <@${targetUserId}> (now has ${newCount} total warning(s)).\n**Reason:** ${reason}`,

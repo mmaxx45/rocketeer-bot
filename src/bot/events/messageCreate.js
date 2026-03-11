@@ -2,6 +2,7 @@ const logger = require('../../logger');
 const { getSettings, getExemptChannels } = require('../../database/settings');
 const { cacheMessage, getRecentMessages, deleteMessage } = require('../../database/messages');
 const { addWarning, getWarningCount } = require('../../database/warnings');
+const { addModAction } = require('../../database/modactions');
 const { getSimilarity, normalizeMessage, MIN_MESSAGE_LENGTH } = require('../utils/similarity');
 const { isExempt } = require('../utils/permissions');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
@@ -400,6 +401,12 @@ module.exports = {
       detailEmbed.setTitle('Crosspost Detected - Repeat Offense');
       detailEmbed.setFooter({ text: `Warning #${warningCount}` });
       detailEmbed.setTimestamp();
+
+      try {
+        addModAction(guildId, message.client.user.id, 'crosspost_warn', message.author.id, `Repeated crossposting between channels (similarity: ${bestScore.toFixed(1)}%)`);
+      } catch (err) {
+        logger.warn(`Failed to log mod action: ${err.message}`);
+      }
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
