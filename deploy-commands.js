@@ -30,6 +30,27 @@ const rest = new REST({ version: '10' }).setToken(config.discord.token);
       return;
     }
 
+    // node deploy-commands.js --clear-all  → wipes global + guild commands
+    if (arg === '--clear-all') {
+      console.log('Clearing all global commands...');
+      await rest.put(
+        Routes.applicationCommands(config.discord.clientId),
+        { body: [] }
+      );
+      console.log('Global commands cleared.');
+
+      const guildIdEnv = process.env.DEV_GUILD_ID;
+      if (guildIdEnv) {
+        console.log(`Clearing guild commands for ${guildIdEnv}...`);
+        await rest.put(
+          Routes.applicationGuildCommands(config.discord.clientId, guildIdEnv),
+          { body: [] }
+        );
+        console.log('Guild commands cleared.');
+      }
+      return;
+    }
+
     const guildId = arg;
 
     if (guildId) {

@@ -18,15 +18,26 @@ function buildModActionsEmbed(rows, total, targetUser, page, totalPages) {
     return embed;
   }
 
+  const actionLabels = {
+    warn: '\u26A0\uFE0F Warn',
+    ban: '\uD83D\uDD28 Ban',
+    timeout: '\u23F1\uFE0F Timeout',
+    kick: '\uD83D\uDEAA Kick',
+    crosspost_warn: '\uD83D\uDCCB Crosspost Warn',
+    clear_warning: '\uD83D\uDDD1\uFE0F Clear Warning',
+    clear_all_warnings: '\uD83D\uDDD1\uFE0F Clear All Warnings',
+  };
+
   const lines = rows.map((a, i) => {
     const num = (page - 1) * PAGE_SIZE + i + 1;
     const date = new Date(a.created_at + 'Z').toLocaleDateString('en-US', {
       year: 'numeric', month: 'short', day: 'numeric',
     });
+    const label = actionLabels[a.action_type] || `\u2699\uFE0F ${a.action_type}`;
     const details = a.details
       ? (a.details.length > 80 ? a.details.slice(0, 77) + '...' : a.details)
       : 'N/A';
-    return `**${num}.** ${date} | \`${a.action_type}\` | Target: <@${a.target_id}> | ${details}`;
+    return `**${num}.** ${date} | ${label} | Target: <@${a.target_id}>\n> ${details}`;
   });
 
   const chunk = lines.join('\n');
