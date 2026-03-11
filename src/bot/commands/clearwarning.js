@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { getWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
+const { addModAction } = require('../../database/modactions');
 const { isModerator } = require('../utils/permissions');
 const logger = require('../../logger');
 
@@ -36,6 +37,12 @@ module.exports = {
     // --- Clear all ---
     if (input === 'all') {
       clearUserWarnings(guildId, targetUser.id);
+
+      try {
+        addModAction(guildId, interaction.user.id, 'clear_all_warnings', targetUser.id, `Cleared ${warnings.length} warning(s)`);
+      } catch (err) {
+        logger.warn(`Failed to log mod action: ${err.message}`);
+      }
 
       await interaction.reply({
         content: `Cleared all **${warnings.length}** warning(s) from <@${targetUser.id}>.`,
@@ -82,6 +89,12 @@ module.exports = {
 
     const warning = warnings[number - 1]; // warnings are DESC by created_at, matching /warnings display
     deleteWarning(warning.id, guildId);
+
+    try {
+      addModAction(guildId, interaction.user.id, 'clear_warning', targetUser.id, `Removed warning #${number}: ${warning.reason}`);
+    } catch (err) {
+      logger.warn(`Failed to log mod action: ${err.message}`);
+    }
 
     await interaction.reply({
       content: `Removed warning #${number} from <@${targetUser.id}>.\n**Reason was:** ${warning.reason}`,

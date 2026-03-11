@@ -112,6 +112,23 @@
     <div class="col-md-6">
       <div class="card bg-dark border-secondary">
         <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-clipboard-data"></i> Mod Actions Role</h5>
+          <p class="card-text text-muted small">Members with this role can view moderator action history via <code>/modactions</code>. Admins can always view.</p>
+          <select name="modactions_role_id" class="form-select">
+            <option value="">-- Not set --</option>
+            <% roles.forEach(role => { %>
+              <option value="<%= role.id %>" <%= settings.modactions_role_id === role.id ? 'selected' : '' %>>
+                <%= role.name %>
+              </option>
+            <% }); %>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
           <h5 class="card-title"><i class="bi bi-journal-text"></i> Warn Log Channel</h5>
           <p class="card-text text-muted small">Channel where warning details are posted. Set to "Disabled" to turn off.</p>
           <select name="warn_log_channel_id" class="form-select">
