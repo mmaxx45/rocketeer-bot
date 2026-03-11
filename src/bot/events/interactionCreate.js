@@ -250,6 +250,12 @@ async function handleButton(interaction) {
         deleteMessageSeconds,
       });
 
+      try {
+        addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, pending.reason);
+      } catch (err) {
+        logger.warn(`Failed to log mod action: ${err.message}`);
+      }
+
       deletePendingAction(actionId);
 
       await interaction.update({
