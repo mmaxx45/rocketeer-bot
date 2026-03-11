@@ -26,6 +26,8 @@ function getStmts() {
         modmail_enabled: db.prepare(`UPDATE guild_settings SET modmail_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         modmail_category_id: db.prepare(`UPDATE guild_settings SET modmail_category_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         modactions_role_id: db.prepare(`UPDATE guild_settings SET modactions_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        file_block_enabled: db.prepare(`UPDATE guild_settings SET file_block_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        blocked_extensions: db.prepare(`UPDATE guild_settings SET blocked_extensions = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }

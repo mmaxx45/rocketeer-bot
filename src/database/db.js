@@ -143,6 +143,8 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_mod_actions_guild_mod ON mod_actions(guild_id, moderator_id);
     `);
     db.exec(`ALTER TABLE guild_settings ADD COLUMN modactions_role_id TEXT DEFAULT NULL`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN file_block_enabled INTEGER DEFAULT 1`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN blocked_extensions TEXT DEFAULT NULL`);
     db.pragma('user_version = 7');
   }
 

@@ -5,6 +5,7 @@ const { addWarning, getWarningCount } = require('../../database/warnings');
 const { addModAction } = require('../../database/modactions');
 const { getSimilarity, normalizeMessage, MIN_MESSAGE_LENGTH } = require('../utils/similarity');
 const { isExempt } = require('../utils/permissions');
+const { getBlockedExtensions, isBlockedFile } = require('../utils/fileFilter');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../../database/db');
 const { createThread, getOpenThread, getOpenThreadByChannel, closeThread } = require('../../database/modmail');
@@ -290,29 +291,29 @@ module.exports = {
 
     // Check if this is a message in a modmail channel (mod replying)
     if (message.guild) {
-      const settings = getSettings(message.guild.id);
-      if (settings.modmail_enabled && settings.modmail_category_id) {
-        if (message.channel.parentId === settings.modmail_category_id) {
+      const mmSettings = getSettings(message.guild.id);
+      if (mmSettings.modmail_enabled && mmSettings.modmail_category_id) {
+        if (message.channel.parentId === mmSettings.modmail_category_id) {
           const handled = await handleModmailReply(message);
           if (handled) return;
         }
       }
     }
 
-    if (!message.content) return;
-
-    const normalized = normalizeMessage(message.content);
-    if (normalized.length < MIN_MESSAGE_LENGTH) return;
-
     const guildId = message.guild.id;
     const settings = getSettings(guildId);
     const exemptChannels = getExemptChannels(guildId);
 
-    if (exemptChannels.includes(message.channel.id)) {
-      cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content);
-      return;
-    }
+    const hasContent = message.content && message.content.length > 0;
+    const hasAttachments = message.attachments && message.attachments.size > 0;
 
+    // Nothing to process
+    if (!hasContent && !hasAttachments) return;
+
+    // Check exempt channel (still cache for crosspost if applicable)
+    const isExemptChannel = exemptChannels.includes(message.channel.id);
+
+    // Fetch member for exempt check
     let member = message.member;
     if (!member) {
       try {
@@ -322,7 +323,79 @@ module.exports = {
       }
     }
 
-    if (isExempt(member, settings)) {
+    const memberIsExempt = isExempt(member, settings);
+
+    // --- File upload blocking ---
+    if (hasAttachments && !memberIsExempt && !isExemptChannel && settings.file_block_enabled) {
+      const blockedExtensions = getBlockedExtensions(settings);
+      let blockedExt = null;
+      let blockedFilename = null;
+
+      for (const [, attachment] of message.attachments) {
+        const ext = isBlockedFile(attachment.name, blockedExtensions);
+        if (ext) {
+          blockedExt = ext;
+          blockedFilename = attachment.name;
+          break;
+        }
+      }
+
+      if (blockedExt) {
+        logger.info(`Blocked file upload: user=${message.author.tag} guild=${guildId} file=${blockedFilename} ext=${blockedExt}`);
+
+        try {
+          await message.delete();
+        } catch (err) {
+          logger.warn(`Failed to delete blocked file message: ${err.message}`);
+        }
+
+        try {
+          await message.channel.send({
+            content: `<@${message.author.id}>, your file was removed because \`.${blockedExt}\` files are not allowed here.`,
+          });
+        } catch (err) {
+          logger.warn(`Failed to send file block notification: ${err.message}`);
+        }
+
+        // Log to warn_log_channel_id if configured
+        if (settings.warn_log_channel_id) {
+          try {
+            const logChannel = await message.guild.channels.fetch(settings.warn_log_channel_id);
+            if (logChannel) {
+              const logEmbed = new EmbedBuilder()
+                .setTitle('File Upload Blocked')
+                .setColor(0xFF6600)
+                .addFields(
+                  { name: 'User', value: `<@${message.author.id}> (${message.author.id})`, inline: true },
+                  { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
+                  { name: 'Filename', value: blockedFilename, inline: true },
+                  { name: 'Blocked Extension', value: `.${blockedExt}`, inline: true },
+                )
+                .setTimestamp();
+              await logChannel.send({ embeds: [logEmbed] });
+            }
+          } catch (err) {
+            logger.warn(`Failed to post file block to log channel: ${err.message}`);
+          }
+        }
+
+        return; // Don't process for crosspost
+      }
+    }
+
+    // --- Crosspost detection ---
+    // Requires message content
+    if (!hasContent) return;
+
+    const normalized = normalizeMessage(message.content);
+    if (normalized.length < MIN_MESSAGE_LENGTH) return;
+
+    if (isExemptChannel) {
+      cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content);
+      return;
+    }
+
+    if (memberIsExempt) {
       cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content);
       return;
     }
