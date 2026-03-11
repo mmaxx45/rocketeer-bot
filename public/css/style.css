@@ -1000,6 +1000,12 @@ textarea.form-control {
   color: var(--accent-blurple);
 }
 
+.copy-flash {
+  color: var(--accent-green) !important;
+  background: var(--accent-green-dim) !important;
+  border-color: rgba(87, 242, 135, 0.3) !important;
+}
+
 /* ===== Reset Link ===== */
 .reset-default {
   color: var(--text-muted) !important;

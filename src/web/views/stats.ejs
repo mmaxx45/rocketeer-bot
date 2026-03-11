@@ -93,9 +93,9 @@
               <div class="ranked-item">
                 <span class="ranked-position"><%= i + 1 %></span>
                 <% if (userMap[user.user_id]) { %>
-                  <span class="user-display" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= user.user_id %>')">@<%= userMap[user.user_id] %></span>
+                  <span class="user-display" title="Click to copy ID" onclick="copyId(this, '<%= user.user_id %>')">@<%= userMap[user.user_id] %></span>
                 <% } else { %>
-                  <span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= user.user_id %>')"><%= user.user_id %></span>
+                  <span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="copyId(this, '<%= user.user_id %>')"><%= user.user_id %></span>
                 <% } %>
                 <div class="ranked-bar-track">
                   <div class="bar-chart-fill bar-fill-yellow" style="width: <%= (user.count / maxUserWarnings) * 100 %>%"></div>
@@ -131,9 +131,9 @@
                 <% if (mod.moderator_id === botId) { %>
                   <span class="user-display" style="color: #5865f2; font-weight: 600;"><i class="bi bi-robot"></i> Rocketeer</span>
                 <% } else if (userMap[mod.moderator_id]) { %>
-                  <span class="user-display" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= mod.moderator_id %>')">@<%= userMap[mod.moderator_id] %></span>
+                  <span class="user-display" title="Click to copy ID" onclick="copyId(this, '<%= mod.moderator_id %>')">@<%= userMap[mod.moderator_id] %></span>
                 <% } else { %>
-                  <span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= mod.moderator_id %>')"><%= mod.moderator_id %></span>
+                  <span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="copyId(this, '<%= mod.moderator_id %>')"><%= mod.moderator_id %></span>
                 <% } %>
                 <div class="ranked-bar-track">
                   <div class="bar-chart-fill bar-fill-green" style="width: <%= (mod.count / maxModActions) * 100 %>%"></div>
@@ -223,8 +223,8 @@
                     </span>
                   <% } %>
                 </td>
-                <td><% if (action.moderator_id === botId) { %><span class="user-display" style="color: #5865f2;"><i class="bi bi-robot"></i> Rocketeer</span><% } else if (userMap[action.moderator_id]) { %><span class="user-display" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= action.moderator_id %>')">@<%= userMap[action.moderator_id] %></span><% } else { %><span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= action.moderator_id %>')"><%= action.moderator_id %></span><% } %></td>
-                <td><% if (userMap[action.target_id]) { %><span class="user-display" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= action.target_id %>')">@<%= userMap[action.target_id] %></span><% } else { %><span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="navigator.clipboard.writeText('<%= action.target_id %>')"><%= action.target_id %></span><% } %></td>
+                <td><% if (action.moderator_id === botId) { %><span class="user-display" style="color: #5865f2;"><i class="bi bi-robot"></i> Rocketeer</span><% } else if (userMap[action.moderator_id]) { %><span class="user-display" title="Click to copy ID" onclick="copyId(this, '<%= action.moderator_id %>')">@<%= userMap[action.moderator_id] %></span><% } else { %><span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="copyId(this, '<%= action.moderator_id %>')"><%= action.moderator_id %></span><% } %></td>
+                <td><% if (userMap[action.target_id]) { %><span class="user-display" title="Click to copy ID" onclick="copyId(this, '<%= action.target_id %>')">@<%= userMap[action.target_id] %></span><% } else { %><span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="copyId(this, '<%= action.target_id %>')"><%= action.target_id %></span><% } %></td>
                 <td style="max-width: 250px;">
                   <% if (action.details) { %>
                     <span class="text-muted" title="<%= action.details %>"><%= action.details.length > 60 ? action.details.slice(0, 60) + '...' : action.details %></span>

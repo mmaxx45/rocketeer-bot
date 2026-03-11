@@ -7,5 +7,14 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="/js/dashboard.js"></script>
+  <script>
+  function copyId(el, id) {
+    navigator.clipboard.writeText(id);
+    const orig = el.textContent;
+    el.textContent = 'Copied!';
+    el.classList.add('copy-flash');
+    setTimeout(() => { el.textContent = orig; el.classList.remove('copy-flash'); }, 1000);
+  }
+  </script>
 </body>
 </html>
