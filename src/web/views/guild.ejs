@@ -61,6 +61,9 @@
       <a class="sidebar-nav-item" href="#section-messages" data-section="section-messages">
         <i class="bi bi-chat-quote"></i> Custom Messages
       </a>
+      <a class="sidebar-nav-item" href="#section-bot" data-section="section-bot">
+        <i class="bi bi-robot"></i> Bot
+      </a>
     </div>
 
     <!-- Settings Content -->
@@ -470,6 +473,27 @@ Please review the channel list and post in the most appropriate channel moving f
                 <textarea name="warn_public_message" class="form-control" rows="3"
                           placeholder="{user}, you have received an official warning."><%= settings.warn_public_message || '' %></textarea>
                 <a href="#" class="small mt-1 d-inline-block reset-default" data-target="warn_public_message">Reset to default</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bot Section -->
+      <div class="settings-section" id="section-bot">
+        <div class="section-header">
+          <i class="bi bi-robot"></i>
+          <h5>Bot</h5>
+        </div>
+        <div class="section-body">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-chat-dots"></i> Status Message</label>
+                <span class="setting-hint">The bot's custom status shown under its name in Discord. Leave blank to clear. Updates instantly.</span>
+                <input type="text" name="bot_status_message" class="form-control"
+                       placeholder="DM for help!" maxlength="128"
+                       value="<%= settings.bot_status_message || '' %>">
               </div>
             </div>
           </div>

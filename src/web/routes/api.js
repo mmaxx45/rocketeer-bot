@@ -1,4 +1,5 @@
 const express = require('express');
+const { ActivityType } = require('discord.js');
 const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels } = require('../../database/settings');
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
@@ -33,7 +34,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -128,6 +129,23 @@ module.exports = function (client) {
           updateSetting(guildId, 'custom_warn_reasons', null);
         }
       }
+      if (bot_status_message !== undefined) {
+        const msg = bot_status_message.trim() || null;
+        updateSetting(guildId, 'bot_status_message', msg);
+        // Update bot presence immediately
+        try {
+          if (msg) {
+            client.user.setPresence({
+              activities: [{ name: msg, type: ActivityType.Custom }],
+              status: 'online',
+            });
+          } else {
+            client.user.setPresence({ activities: [], status: 'online' });
+          }
+        } catch (err) {
+          logger.warn(`Failed to update bot presence: ${err.message}`);
+        }
+      }
 
       const settings = getSettings(guildId);
       res.json({ success: true, settings });
@@ -201,22 +219,11 @@ module.exports = function (client) {
       const totalWarnings = db.prepare('SELECT COUNT(*) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
       const totalBans = db.prepare("SELECT COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND action_type = 'ban'").get(guildId).count;
       const totalCrosspostIncidents = db.prepare('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?').get(guildId).count;
-      const activeMods = db.prepare('SELECT COUNT(DISTINCT moderator_id) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
-
-      const warningsOverTime = [];
-      for (let i = 7; i >= 0; i--) {
-        const row = db.prepare(`
-          SELECT COUNT(*) as count FROM warnings
-          WHERE guild_id = ?
-            AND created_at >= datetime('now', ? || ' days')
-            AND created_at < datetime('now', ? || ' days')
-        `).get(guildId, String(-i * 7), String(-(i - 1) * 7));
-        const weekStart = new Date();
-        weekStart.setDate(weekStart.getDate() - i * 7);
-        const month = weekStart.toLocaleString('en-US', { month: 'short' });
-        const day = weekStart.getDate();
-        warningsOverTime.push({ label: `${month} ${day}`, count: row.count });
-      }
+      const botId = client.user.id;
+      const activeMods = db.prepare(`
+        SELECT COUNT(DISTINCT moderator_id) as count FROM mod_actions
+        WHERE guild_id = ? AND moderator_id != ? AND created_at >= datetime('now', '-30 days')
+      `).get(guildId, botId).count;
 
       const mostWarnedUsers = db.prepare(`
         SELECT user_id, COUNT(*) as count FROM warnings
@@ -243,7 +250,6 @@ module.exports = function (client) {
         totalBans,
         totalCrosspostIncidents,
         activeMods,
-        warningsOverTime,
         mostWarnedUsers,
         mostActiveMods,
         warningReasons,
@@ -252,6 +258,57 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to fetch stats:', err);
       res.status(500).json({ error: 'Failed to fetch stats' });
+    }
+  });
+
+  // Get warnings over time (for chart)
+  router.get('/guild/:guildId/warnings-over-time', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const range = req.query.range || '8w';
+
+    // Determine bucket size and count based on range
+    const ranges = {
+      '7d':  { buckets: 7,  bucketDays: 1,  labelFmt: 'day' },
+      '30d': { buckets: 30, bucketDays: 1,  labelFmt: 'day' },
+      '8w':  { buckets: 8,  bucketDays: 7,  labelFmt: 'week' },
+      '6m':  { buckets: 6,  bucketDays: 30, labelFmt: 'month' },
+      '1y':  { buckets: 12, bucketDays: 30, labelFmt: 'month' },
+    };
+
+    const config = ranges[range] || ranges['8w'];
+    const { buckets, bucketDays, labelFmt } = config;
+
+    try {
+      const data = [];
+      for (let i = buckets - 1; i >= 0; i--) {
+        const startDay = -(i + 1) * bucketDays;
+        const endDay = -i * bucketDays;
+        const row = db.prepare(`
+          SELECT COUNT(*) as count FROM warnings
+          WHERE guild_id = ?
+            AND created_at >= datetime('now', ? || ' days')
+            AND created_at < datetime('now', ? || ' days')
+        `).get(guildId, String(startDay), String(endDay));
+
+        const date = new Date();
+        date.setDate(date.getDate() + startDay + bucketDays);
+
+        let label;
+        if (labelFmt === 'day') {
+          label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        } else if (labelFmt === 'month') {
+          label = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+        } else {
+          label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        data.push({ label, count: row.count });
+      }
+
+      res.json({ range, data });
+    } catch (err) {
+      logger.error('Failed to fetch warnings over time:', err);
+      res.status(500).json({ error: 'Failed to fetch data' });
     }
   });
 

@@ -53,28 +53,22 @@
   <div class="section-header">
     <i class="bi bi-graph-up"></i>
     <h5>Warnings Over Time</h5>
-    <span class="ms-auto" style="font-size: 0.78rem; color: var(--text-muted);">Last 8 weeks</span>
+    <div class="ms-auto d-flex gap-1">
+      <button class="btn btn-sm btn-outline-secondary chart-range-btn" data-range="7d">7D</button>
+      <button class="btn btn-sm btn-outline-secondary chart-range-btn" data-range="30d">30D</button>
+      <button class="btn btn-sm btn-outline-secondary chart-range-btn active" data-range="8w">8W</button>
+      <button class="btn btn-sm btn-outline-secondary chart-range-btn" data-range="6m">6M</button>
+      <button class="btn btn-sm btn-outline-secondary chart-range-btn" data-range="1y">1Y</button>
+    </div>
   </div>
   <div class="section-body">
-    <% if (stats.warningsOverTime.length === 0 || stats.warningsOverTime.every(w => w.count === 0)) { %>
-      <div class="stats-empty-mini">
-        <i class="bi bi-graph-up"></i>
-        <p>No warning data for the last 8 weeks.</p>
-      </div>
-    <% } else { %>
-      <% const maxCount = Math.max(...stats.warningsOverTime.map(w => w.count), 1); %>
-      <div class="stats-bar-chart">
-        <% stats.warningsOverTime.forEach(week => { %>
-          <div class="bar-chart-row">
-            <div class="bar-chart-label"><%= week.label %></div>
-            <div class="bar-chart-track">
-              <div class="bar-chart-fill bar-fill-blurple" style="width: <%= (week.count / maxCount) * 100 %>%"></div>
-            </div>
-            <div class="bar-chart-value"><%= week.count %></div>
-          </div>
-        <% }); %>
-      </div>
-    <% } %>
+    <div id="warnings-chart-empty" class="stats-empty-mini" style="display: none;">
+      <i class="bi bi-graph-up"></i>
+      <p>No warning data for this period.</p>
+    </div>
+    <div style="position: relative; height: 280px;">
+      <canvas id="warnings-chart"></canvas>
+    </div>
   </div>
 </div>
 
@@ -130,7 +124,11 @@
             <% stats.mostActiveMods.forEach((mod, i) => { %>
               <div class="ranked-item">
                 <span class="ranked-position"><%= i + 1 %></span>
-                <span class="user-id-cell"><%= mod.moderator_id %></span>
+                <% if (mod.moderator_id === botId) { %>
+                  <span class="user-id-cell" style="color: #5865f2; font-weight: 600;"><i class="bi bi-robot"></i> Rocketeer</span>
+                <% } else { %>
+                  <span class="user-id-cell"><%= mod.moderator_id %></span>
+                <% } %>
                 <div class="ranked-bar-track">
                   <div class="bar-chart-fill bar-fill-green" style="width: <%= (mod.count / maxModActions) * 100 %>%"></div>
                 </div>
@@ -219,7 +217,7 @@
                     </span>
                   <% } %>
                 </td>
-                <td><span class="user-id-cell"><%= action.moderator_id %></span></td>
+                <td><% if (action.moderator_id === botId) { %><span class="user-id-cell" style="color: #5865f2;"><i class="bi bi-robot"></i> Rocketeer</span><% } else { %><span class="user-id-cell"><%= action.moderator_id %></span><% } %></td>
                 <td><span class="user-id-cell"><%= action.target_id %></span></td>
                 <td style="max-width: 250px;">
                   <% if (action.details) { %>
@@ -239,5 +237,102 @@
     <% } %>
   </div>
 </div>
+
+<script>
+(function () {
+  const guildId = '<%= guild.id %>';
+  const canvas = document.getElementById('warnings-chart');
+  const emptyMsg = document.getElementById('warnings-chart-empty');
+  if (!canvas) return;
+
+  let chart = null;
+
+  async function loadChart(range) {
+    try {
+      const res = await fetch(`/api/guild/${guildId}/warnings-over-time?range=${range}`);
+      const json = await res.json();
+      const data = json.data || [];
+
+      const allZero = data.every(d => d.count === 0);
+      emptyMsg.style.display = allZero ? '' : 'none';
+      canvas.style.display = allZero ? 'none' : '';
+
+      if (chart) chart.destroy();
+
+      chart = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: data.map(d => d.label),
+          datasets: [{
+            label: 'Warnings',
+            data: data.map(d => d.count),
+            borderColor: '#5865f2',
+            backgroundColor: 'rgba(88, 101, 242, 0.15)',
+            fill: true,
+            tension: 0.3,
+            pointBackgroundColor: '#5865f2',
+            pointBorderColor: '#5865f2',
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            borderWidth: 2.5,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { intersect: false, mode: 'index' },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(30, 31, 34, 0.95)',
+              titleColor: '#fff',
+              bodyColor: '#b5bac1',
+              borderColor: '#5865f2',
+              borderWidth: 1,
+              padding: 10,
+              displayColors: false,
+              callbacks: {
+                label: function (ctx) {
+                  const v = ctx.parsed.y;
+                  return v === 1 ? '1 warning' : v + ' warnings';
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255,255,255,0.06)' },
+              ticks: { color: '#8b8d91', font: { size: 11 } },
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: 'rgba(255,255,255,0.06)' },
+              ticks: {
+                color: '#8b8d91',
+                font: { size: 11 },
+                precision: 0,
+              },
+            },
+          },
+        },
+      });
+    } catch (err) {
+      console.error('Failed to load chart:', err);
+    }
+  }
+
+  // Range button handling
+  document.querySelectorAll('.chart-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.chart-range-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadChart(btn.dataset.range);
+    });
+  });
+
+  // Initial load
+  loadChart('8w');
+})();
+</script>
 
 <%- footer %>

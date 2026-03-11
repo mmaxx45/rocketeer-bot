@@ -30,6 +30,7 @@ function getStmts() {
         blocked_extensions: db.prepare(`UPDATE guild_settings SET blocked_extensions = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         banreason_role_id: db.prepare(`UPDATE guild_settings SET banreason_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         custom_warn_reasons: db.prepare(`UPDATE guild_settings SET custom_warn_reasons = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        bot_status_message: db.prepare(`UPDATE guild_settings SET bot_status_message = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }

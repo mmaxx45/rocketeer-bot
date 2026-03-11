@@ -157,6 +157,12 @@ function runMigrations() {
     db.pragma('user_version = 8');
   }
 
+  if (version < 9) {
+    logger.info('Running database migration v9: add bot_status_message');
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN bot_status_message TEXT DEFAULT NULL`);
+    db.pragma('user_version = 9');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

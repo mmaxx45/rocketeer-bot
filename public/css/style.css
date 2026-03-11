@@ -1111,6 +1111,20 @@ textarea.form-control {
 .animate-in:nth-child(7) { animation-delay: 0.21s; }
 .animate-in:nth-child(8) { animation-delay: 0.24s; }
 
+/* ===== Stats Page: Chart Range Buttons ===== */
+.chart-range-btn {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 4px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.chart-range-btn.active {
+  background-color: #5865f2;
+  border-color: #5865f2;
+  color: #fff;
+}
+
 /* ===== Stats Page: Bar Charts ===== */
 .stats-bar-chart {
   display: flex;

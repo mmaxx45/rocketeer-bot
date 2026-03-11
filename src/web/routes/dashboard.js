@@ -135,28 +135,12 @@ module.exports = function (client) {
     // Total crosspost incidents
     const totalCrosspostIncidents = db.prepare('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?').get(guildId).count;
 
-    // Active moderators (distinct mods who issued warnings)
-    const activeMods = db.prepare('SELECT COUNT(DISTINCT moderator_id) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
-
-    // Warnings over time (last 8 weeks)
-    const warningsOverTime = [];
-    for (let i = 7; i >= 0; i--) {
-      const row = db.prepare(`
-        SELECT COUNT(*) as count FROM warnings
-        WHERE guild_id = ?
-          AND created_at >= datetime('now', ? || ' days')
-          AND created_at < datetime('now', ? || ' days')
-      `).get(guildId, String(-i * 7), String(-(i - 1) * 7));
-
-      const weekStart = new Date();
-      weekStart.setDate(weekStart.getDate() - i * 7);
-      const month = weekStart.toLocaleString('en-US', { month: 'short' });
-      const day = weekStart.getDate();
-      warningsOverTime.push({
-        label: `${month} ${day}`,
-        count: row.count,
-      });
-    }
+    // Active moderators (distinct human mods with actions in the last 30 days)
+    const botId = client.user.id;
+    const activeMods = db.prepare(`
+      SELECT COUNT(DISTINCT moderator_id) as count FROM mod_actions
+      WHERE guild_id = ? AND moderator_id != ? AND created_at >= datetime('now', '-30 days')
+    `).get(guildId, botId).count;
 
     // Most warned users (top 10)
     const mostWarnedUsers = db.prepare(`
@@ -167,7 +151,7 @@ module.exports = function (client) {
       LIMIT 10
     `).all(guildId);
 
-    // Most active moderators (top 10, based on mod_actions which logs all actions)
+    // Most active moderators (top 10)
     const mostActiveMods = db.prepare(`
       SELECT moderator_id, COUNT(*) as count FROM mod_actions
       WHERE guild_id = ?
@@ -198,12 +182,12 @@ module.exports = function (client) {
       user: req.user,
       guild,
       title: guild.name + ' - Statistics',
+      botId,
       stats: {
         totalWarnings,
         totalBans,
         totalCrosspostIncidents,
         activeMods,
-        warningsOverTime,
         mostWarnedUsers,
         mostActiveMods,
         warningReasons,
