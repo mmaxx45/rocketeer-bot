@@ -23,6 +23,8 @@ function getStmts() {
         crosspost_kick_count: db.prepare(`UPDATE guild_settings SET crosspost_kick_count = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         crosspost_kick_window_minutes: db.prepare(`UPDATE guild_settings SET crosspost_kick_window_minutes = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         ban_role_id: db.prepare(`UPDATE guild_settings SET ban_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        modmail_enabled: db.prepare(`UPDATE guild_settings SET modmail_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        modmail_category_id: db.prepare(`UPDATE guild_settings SET modmail_category_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }

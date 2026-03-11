@@ -5,6 +5,7 @@ const { getSettings } = require('../../database/settings');
 const { canWarn, canBan, isExempt, isModerator } = require('../utils/permissions');
 const { storePendingAction, getPendingAction, deletePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
+const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
 
 async function handleButton(interaction) {
   const [action, ...params] = interaction.customId.split(':');
@@ -264,6 +265,78 @@ async function handleButton(interaction) {
       embeds: [],
       components: [],
     });
+    return;
+  }
+
+  if (action === 'modmail_close') {
+    const channelId = params[0];
+    const thread = getOpenThreadByChannel(channelId);
+
+    if (!thread) {
+      return interaction.reply({ content: 'This modmail thread is already closed or does not exist.', ephemeral: true });
+    }
+
+    // Check if user is a moderator
+    const settings = getSettings(interaction.guild.id);
+    if (!isModerator(interaction.member, settings)) {
+      return interaction.reply({ content: 'Only moderators can close modmail threads.', ephemeral: true });
+    }
+
+    try {
+      // Notify the user
+      try {
+        const user = await interaction.client.users.fetch(thread.user_id);
+        await user.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('Modmail Thread Closed')
+              .setDescription(`Your modmail thread in **${interaction.guild.name}** has been closed by a moderator. If you need further assistance, send another message.`)
+              .setColor(0xE74C3C)
+              .setTimestamp(),
+          ],
+        });
+      } catch (err) {
+        logger.warn(`Failed to notify user of modmail closure: ${err.message}`);
+      }
+
+      // Close in database
+      closeThread(thread.id, interaction.user.id);
+
+      // Update the message
+      await interaction.update({
+        content: `Thread closed by <@${interaction.user.id}>.`,
+        components: [],
+      });
+
+      // Archive and lock the channel
+      try {
+        const channel = await interaction.guild.channels.fetch(channelId);
+        if (channel) {
+          await channel.setName(`closed-${channel.name}`);
+          // Send a final message
+          await channel.send({
+            embeds: [
+              new EmbedBuilder()
+                .setTitle('Thread Closed')
+                .setDescription(`This modmail thread was closed by <@${interaction.user.id}>.`)
+                .setColor(0xE74C3C)
+                .setTimestamp(),
+            ],
+          });
+          // Lock the channel by denying SendMessages for everyone
+          await channel.permissionOverwrites.edit(interaction.guild.roles.everyone.id, {
+            SendMessages: false,
+          });
+        }
+      } catch (err) {
+        logger.warn(`Failed to archive modmail channel: ${err.message}`);
+      }
+
+      logger.info(`Modmail thread closed: channel=${channelId} closedBy=${interaction.user.tag}`);
+    } catch (err) {
+      logger.error(`Failed to close modmail thread: ${err.message}`);
+      await interaction.reply({ content: `Failed to close thread: ${err.message}`, ephemeral: true });
+    }
     return;
   }
 }

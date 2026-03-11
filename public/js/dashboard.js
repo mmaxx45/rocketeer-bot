@@ -29,6 +29,13 @@ if (settingsForm) {
     const formData = new FormData(settingsForm);
     const data = Object.fromEntries(formData.entries());
 
+    // Handle unchecked checkboxes (they are omitted from FormData)
+    settingsForm.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      if (!data[cb.name]) {
+        data[cb.name] = '';
+      }
+    });
+
     try {
       const res = await fetch(`/api/guild/${guildId}/settings`, {
         method: 'POST',

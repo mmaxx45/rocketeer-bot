@@ -106,11 +106,29 @@ function runMigrations() {
   }
 
   if (version < 7) {
-    logger.info('Running database migration v7: add crosspost kick settings, ban_role_id, and warning message_content');
+    logger.info('Running database migration v7: new features batch');
     db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_kick_count INTEGER DEFAULT 3`);
     db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_kick_window_minutes INTEGER DEFAULT 60`);
     db.exec(`ALTER TABLE guild_settings ADD COLUMN ban_role_id TEXT DEFAULT NULL`);
     db.exec(`ALTER TABLE warnings ADD COLUMN message_content TEXT DEFAULT NULL`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN modmail_enabled INTEGER DEFAULT 0`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN modmail_category_id TEXT DEFAULT NULL`);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS modmail_threads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
+        created_at TEXT DEFAULT (datetime('now')),
+        closed_at TEXT DEFAULT NULL,
+        closed_by TEXT DEFAULT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_modmail_guild_user ON modmail_threads(guild_id, user_id);
+      CREATE INDEX IF NOT EXISTS idx_modmail_channel ON modmail_threads(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_modmail_status ON modmail_threads(status);
+    `);
     db.pragma('user_version = 7');
   }
 

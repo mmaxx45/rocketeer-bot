@@ -66,6 +66,11 @@ module.exports = function (client) {
       .sort((a, b) => a.position - b.position)
       .map(c => ({ id: c.id, name: c.name }));
 
+    const categories = botGuild.channels.cache
+      .filter(c => c.type === 4) // GuildCategory
+      .sort((a, b) => a.position - b.position)
+      .map(c => ({ id: c.id, name: c.name }));
+
     const guild = { id: botGuild.id, name: botGuild.name, icon: botGuild.iconURL() };
     res.render('guild', {
       user: req.user,
@@ -75,6 +80,7 @@ module.exports = function (client) {
       exemptChannels,
       roles,
       channels,
+      categories,
     });
   });
 
