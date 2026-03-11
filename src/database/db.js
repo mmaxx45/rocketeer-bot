@@ -105,6 +105,13 @@ function runMigrations() {
     db.pragma('user_version = 6');
   }
 
+  if (version < 7) {
+    logger.info('Running database migration v7: add file upload blocking settings');
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN file_block_enabled INTEGER DEFAULT 1`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN blocked_extensions TEXT DEFAULT NULL`);
+    db.pragma('user_version = 7');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

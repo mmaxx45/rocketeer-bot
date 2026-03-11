@@ -33,7 +33,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, file_block_enabled, blocked_extensions } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -80,6 +80,18 @@ module.exports = function (client) {
       }
       if (warn_public_message !== undefined) {
         updateSetting(guildId, 'warn_public_message', warn_public_message.trim() || null);
+      }
+      if (file_block_enabled !== undefined) {
+        updateSetting(guildId, 'file_block_enabled', file_block_enabled === 'on' || file_block_enabled === '1' || file_block_enabled === true ? 1 : 0);
+      }
+      if (blocked_extensions !== undefined) {
+        const raw = blocked_extensions.trim();
+        if (!raw) {
+          updateSetting(guildId, 'blocked_extensions', null);
+        } else {
+          const parsed = raw.split(/[,\s]+/).map(ext => ext.toLowerCase().replace(/^\./, '').trim()).filter(Boolean);
+          updateSetting(guildId, 'blocked_extensions', JSON.stringify(parsed));
+        }
       }
 
       const settings = getSettings(guildId);

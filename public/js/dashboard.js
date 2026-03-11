@@ -29,6 +29,11 @@ if (settingsForm) {
     const formData = new FormData(settingsForm);
     const data = Object.fromEntries(formData.entries());
 
+    // Handle unchecked checkboxes (they are not included in FormData)
+    if (!data.file_block_enabled) {
+      data.file_block_enabled = '0';
+    }
+
     try {
       const res = await fetch(`/api/guild/${guildId}/settings`, {
         method: 'POST',
