@@ -18,7 +18,14 @@ function buildWarningsEmbed(warnings, user, guild, showModerator = true) {
     });
     const type = w.type === 'crosspost' ? 'Crosspost' : 'Manual';
     const modPart = showModerator ? ` | By <@${w.moderator_id}>` : '';
-    return `**${i + 1}.** ${date} | ${type}${modPart} | ${w.reason}`;
+    let line = `**${i + 1}.** ${date} | ${type}${modPart} | ${w.reason}`;
+    if (w.message_content) {
+      const truncated = w.message_content.length > 200
+        ? w.message_content.slice(0, 200) + '...'
+        : w.message_content;
+      line += `\n> "${truncated}"`;
+    }
+    return line;
   });
 
   const chunk = lines.join('\n');

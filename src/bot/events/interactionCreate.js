@@ -97,7 +97,7 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
     }
 
-    addWarning(interaction.guild.id, pending.targetId, pending.moderatorId, pending.reason, 'manual');
+    addWarning(interaction.guild.id, pending.targetId, pending.moderatorId, pending.reason, 'manual', pending.messageContent || null);
     const newCount = getWarningCount(interaction.guild.id, pending.targetId);
 
     deletePendingAction(actionId);
@@ -268,6 +268,38 @@ async function handleButton(interaction) {
   }
 }
 
+const DEFAULT_WARN_REASONS = [
+  'Spam or flooding',
+  'Inappropriate language',
+  'Harassment or bullying',
+  'NSFW content',
+  'Advertising or self-promotion',
+  'Crossposting',
+  'Off-topic',
+  'Impersonation',
+  'Sharing personal information',
+  'Trolling or disruptive behavior',
+];
+
+async function handleAutocomplete(interaction) {
+  if (interaction.commandName !== 'warn') return;
+
+  const focused = interaction.options.getFocused(true);
+  if (focused.name !== 'reason') return;
+
+  const typed = focused.value.toLowerCase();
+  const filtered = DEFAULT_WARN_REASONS
+    .filter(r => r.toLowerCase().includes(typed))
+    .slice(0, 25)
+    .map(r => ({ name: r, value: r }));
+
+  try {
+    await interaction.respond(filtered);
+  } catch (err) {
+    logger.warn(`Failed to respond to autocomplete: ${err.message}`);
+  }
+}
+
 async function handleCommand(interaction) {
   const command = interaction.client.commands.get(interaction.commandName);
   if (!command) {
@@ -320,6 +352,18 @@ async function handleModalSubmit(interaction) {
   const existingWarnings = getWarnings(interaction.guild.id, targetUserId);
   const warningThreshold = settings.warning_threshold || 3;
 
+  // Fetch the target message content for storage
+  let messageContent = null;
+  try {
+    const srcChannel = await interaction.guild.channels.fetch(channelId);
+    const srcMessage = await srcChannel.messages.fetch(messageId);
+    if (srcMessage && srcMessage.content) {
+      messageContent = srcMessage.content;
+    }
+  } catch {
+    // Message may have been deleted
+  }
+
   if (existingWarnings.length >= warningThreshold) {
     const embed = buildWarningsEmbed(existingWarnings, targetUser, interaction.guild);
     const displayName = targetUser.tag || targetUser.username;
@@ -337,6 +381,7 @@ async function handleModalSubmit(interaction) {
       guildId: interaction.guild.id,
       messageId,
       channelId,
+      messageContent,
     });
 
     const buttons = [];
@@ -369,7 +414,7 @@ async function handleModalSubmit(interaction) {
   }
 
   // Below threshold - issue directly
-  addWarning(interaction.guild.id, targetUserId, interaction.user.id, reason, 'manual');
+  addWarning(interaction.guild.id, targetUserId, interaction.user.id, reason, 'manual', messageContent);
   const newCount = getWarningCount(interaction.guild.id, targetUserId);
 
   await interaction.reply({
@@ -442,6 +487,9 @@ async function handleModalSubmit(interaction) {
 module.exports = {
   name: 'interactionCreate',
   async execute(interaction) {
+    if (interaction.isAutocomplete()) {
+      return handleAutocomplete(interaction);
+    }
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
       return handleCommand(interaction);
     }

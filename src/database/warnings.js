@@ -5,7 +5,7 @@ let stmts;
 function getStmts() {
   if (!stmts) {
     stmts = {
-      addWarning: db.prepare(`INSERT INTO warnings (guild_id, user_id, moderator_id, reason, type) VALUES (?, ?, ?, ?, ?)`),
+      addWarning: db.prepare(`INSERT INTO warnings (guild_id, user_id, moderator_id, reason, type, message_content) VALUES (?, ?, ?, ?, ?, ?)`),
       getWarnings: db.prepare(`SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? ORDER BY created_at ASC`),
       getWarningCount: db.prepare(`SELECT COUNT(*) as count FROM warnings WHERE guild_id = ? AND user_id = ?`),
       getRecentWarnings: db.prepare(`SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? AND created_at > datetime('now', '-' || ? || ' hours') ORDER BY created_at DESC`),
@@ -18,8 +18,8 @@ function getStmts() {
   return stmts;
 }
 
-function addWarning(guildId, userId, moderatorId, reason, type = 'manual') {
-  return getStmts().addWarning.run(guildId, userId, moderatorId, reason, type);
+function addWarning(guildId, userId, moderatorId, reason, type = 'manual', messageContent = null) {
+  return getStmts().addWarning.run(guildId, userId, moderatorId, reason, type, messageContent);
 }
 
 function getWarnings(guildId, userId) {

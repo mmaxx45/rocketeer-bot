@@ -150,7 +150,7 @@ module.exports = {
         bestScore, 'warned'
       );
 
-      addWarning(guildId, message.author.id, message.client.user.id, `Repeated crossposting between channels (similarity: ${bestScore.toFixed(1)}%)`, 'crosspost');
+      addWarning(guildId, message.author.id, message.client.user.id, `Repeated crossposting between channels (similarity: ${bestScore.toFixed(1)}%)`, 'crosspost', message.content);
       const warningCount = getWarningCount(guildId, message.author.id);
 
       // Build crosspost detail embed for the warning message
