@@ -36,9 +36,7 @@ function isModerator(member, settings) {
 
 function canWarn(member, settings) {
   if (!member) return false;
-  // Full moderators can always warn
   if (isModerator(member, settings)) return true;
-  // Warn role holders (trial mods) can warn
   if (settings && settings.warn_role_id) {
     return member.roles.cache.has(settings.warn_role_id);
   }
@@ -64,4 +62,13 @@ function canViewModActions(member, settings) {
   return false;
 }
 
-module.exports = { isExempt, isModerator, canWarn, canBan, canViewModActions };
+function canViewBanReason(member, settings) {
+  if (!member) return false;
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
+  if (settings && settings.banreason_role_id) {
+    return member.roles.cache.has(settings.banreason_role_id);
+  }
+  return false;
+}
+
+module.exports = { isExempt, isModerator, canWarn, canBan, canViewModActions, canViewBanReason };
