@@ -7,8 +7,13 @@
   </ol>
 </nav>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h2><%= guild.name %> &mdash; Settings</h2>
+<div class="guild-page-header">
+  <div class="guild-title">
+    <% if (guild.icon) { %>
+      <img src="<%= guild.icon %>?size=80" class="guild-icon-sm" alt="icon">
+    <% } %>
+    <h2><%= guild.name %></h2>
+  </div>
   <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
     <i class="bi bi-exclamation-triangle"></i> View Warnings
   </a>
@@ -17,393 +22,463 @@
 <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3"></div>
 
 <form id="settings-form" data-guild-id="<%= guild.id %>">
-  <div class="row g-4">
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-shield"></i> Moderator Role</h5>
-          <p class="card-text text-muted small">This role and all roles above it are exempt from crosspost detection.</p>
-          <select name="moderator_role_id" class="form-select">
-            <option value="">-- Not set --</option>
-            <% roles.forEach(role => { %>
-              <option value="<%= role.id %>" <%= settings.moderator_role_id === role.id ? 'selected' : '' %>>
-                <%= role.name %>
-              </option>
-            <% }); %>
-          </select>
-        </div>
-      </div>
+  <div class="guild-settings-layout">
+
+    <!-- Sidebar Navigation -->
+    <div class="settings-sidebar">
+      <a class="sidebar-nav-item active" href="#section-roles" data-section="section-roles">
+        <i class="bi bi-shield"></i> Roles
+      </a>
+      <a class="sidebar-nav-item" href="#section-channels" data-section="section-channels">
+        <i class="bi bi-hash"></i> Channels
+      </a>
+      <a class="sidebar-nav-item" href="#section-crosspost" data-section="section-crosspost">
+        <i class="bi bi-layers"></i> Crosspost Detection
+      </a>
+      <a class="sidebar-nav-item" href="#section-autokick" data-section="section-autokick">
+        <i class="bi bi-door-open"></i> Auto-Kick
+      </a>
+      <a class="sidebar-nav-item" href="#section-warnings" data-section="section-warnings">
+        <i class="bi bi-exclamation-octagon"></i> Warning System
+      </a>
+      <a class="sidebar-nav-item" href="#section-exempt" data-section="section-exempt">
+        <i class="bi bi-slash-circle"></i> Exempt Channels
+      </a>
+      <a class="sidebar-nav-item" href="#section-modmail" data-section="section-modmail">
+        <i class="bi bi-envelope"></i> Modmail
+      </a>
+      <a class="sidebar-nav-item" href="#section-fileblock" data-section="section-fileblock">
+        <i class="bi bi-file-earmark-lock"></i> File Blocking
+      </a>
+      <a class="sidebar-nav-item" href="#section-warnreasons" data-section="section-warnreasons">
+        <i class="bi bi-list-check"></i> Warning Reasons
+      </a>
+      <a class="sidebar-nav-item" href="#section-messages" data-section="section-messages">
+        <i class="bi bi-chat-quote"></i> Custom Messages
+      </a>
     </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-sliders"></i> Similarity Threshold</h5>
-          <p class="card-text text-muted small">How similar messages must be to trigger crosspost detection (1-100%).</p>
-          <div class="d-flex align-items-center gap-3">
-            <input type="range" name="crosspost_threshold" class="form-range flex-grow-1"
-                   min="1" max="100" value="<%= settings.crosspost_threshold %>"
-                   oninput="this.nextElementSibling.textContent = this.value + '%'">
-            <span class="badge bg-primary fs-6"><%= settings.crosspost_threshold %>%</span>
+    <!-- Settings Content -->
+    <div class="settings-content">
+
+      <!-- Roles Section -->
+      <div class="settings-section" id="section-roles">
+        <div class="section-header">
+          <i class="bi bi-shield"></i>
+          <h5>Roles</h5>
+        </div>
+        <div class="section-body">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Moderator Role</label>
+                <span class="setting-hint">This role and all roles above it are exempt from crosspost detection.</span>
+                <select name="moderator_role_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% roles.forEach(role => { %>
+                    <option value="<%= role.id %>" <%= settings.moderator_role_id === role.id ? 'selected' : '' %>>
+                      <%= role.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Warn Role (Trial Mod)</label>
+                <span class="setting-hint">Members with this role can issue warnings but cannot ban.</span>
+                <select name="warn_role_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% roles.forEach(role => { %>
+                    <option value="<%= role.id %>" <%= settings.warn_role_id === role.id ? 'selected' : '' %>>
+                      <%= role.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-hammer"></i> Ban Role</label>
+                <span class="setting-hint">Members with this role can use /ban without needing the Ban Members permission.</span>
+                <select name="ban_role_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% roles.forEach(role => { %>
+                    <option value="<%= role.id %>" <%= settings.ban_role_id === role.id ? 'selected' : '' %>>
+                      <%= role.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-clipboard-data"></i> Mod Actions Role</label>
+                <span class="setting-hint">Members with this role can view moderator action history via /modactions. Admins can always view.</span>
+                <select name="modactions_role_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% roles.forEach(role => { %>
+                    <option value="<%= role.id %>" <%= settings.modactions_role_id === role.id ? 'selected' : '' %>>
+                      <%= role.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-search"></i> Ban Reason Role</label>
+                <span class="setting-hint">Members with this role can use /banreason to look up why a user was banned.</span>
+                <select name="banreason_role_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% roles.forEach(role => { %>
+                    <option value="<%= role.id %>" <%= settings.banreason_role_id === role.id ? 'selected' : '' %>>
+                      <%= role.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-clock"></i> Detection Window</h5>
-          <p class="card-text text-muted small">How quickly a similar message in another channel triggers crosspost detection.</p>
-          <div class="input-group">
-            <input type="number" name="crosspost_detection_seconds" class="form-control"
-                   min="5" max="3600" value="<%= settings.crosspost_detection_seconds %>">
-            <span class="input-group-text">seconds</span>
+      <!-- Channels Section -->
+      <div class="settings-section" id="section-channels">
+        <div class="section-header">
+          <i class="bi bi-hash"></i>
+          <h5>Log Channels</h5>
+        </div>
+        <div class="section-body">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-journal-text"></i> Warn Log Channel</label>
+                <span class="setting-hint">Channel where warning details are posted. Set to "Disabled" to turn off.</span>
+                <select name="warn_log_channel_id" class="form-select">
+                  <option value="">-- Disabled --</option>
+                  <% channels.forEach(ch => { %>
+                    <option value="<%= ch.id %>" <%= settings.warn_log_channel_id === ch.id ? 'selected' : '' %>>
+                      #<%= ch.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-hammer"></i> Ban Log Channel</label>
+                <span class="setting-hint">Channel where bans triggered by the warning system are logged.</span>
+                <select name="ban_log_channel_id" class="form-select">
+                  <option value="">-- Disabled --</option>
+                  <% channels.forEach(ch => { %>
+                    <option value="<%= ch.id %>" <%= settings.ban_log_channel_id === ch.id ? 'selected' : '' %>>
+                      #<%= ch.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-arrow-repeat"></i> Repeat Offense Window</h5>
-          <p class="card-text text-muted small">If a user crossposts again within this period, it escalates to a warning.</p>
-          <div class="input-group">
-            <input type="number" name="crosspost_window_hours" class="form-control"
-                   min="1" max="168" value="<%= settings.crosspost_window_hours %>">
-            <span class="input-group-text">hours</span>
+      <!-- Crosspost Detection Section -->
+      <div class="settings-section" id="section-crosspost">
+        <div class="section-header">
+          <i class="bi bi-layers"></i>
+          <h5>Crosspost Detection</h5>
+        </div>
+        <div class="section-body">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-sliders"></i> Similarity Threshold</label>
+                <span class="setting-hint">How similar messages must be to trigger detection (1-100%).</span>
+                <div class="d-flex align-items-center gap-3">
+                  <input type="range" name="crosspost_threshold" class="form-range flex-grow-1"
+                         min="1" max="100" value="<%= settings.crosspost_threshold %>"
+                         oninput="this.nextElementSibling.textContent = this.value + '%'">
+                  <span class="badge bg-primary fs-6" style="min-width: 52px; text-align: center;"><%= settings.crosspost_threshold %>%</span>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-clock"></i> Detection Window</label>
+                <span class="setting-hint">How quickly a similar message in another channel triggers detection.</span>
+                <div class="input-group">
+                  <input type="number" name="crosspost_detection_seconds" class="form-control"
+                         min="5" max="3600" value="<%= settings.crosspost_detection_seconds %>">
+                  <span class="input-group-text">seconds</span>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-arrow-repeat"></i> Repeat Offense Window</label>
+                <span class="setting-hint">If a user crossposts again within this period, it escalates to a warning.</span>
+                <div class="input-group">
+                  <input type="number" name="crosspost_window_hours" class="form-control"
+                         min="1" max="168" value="<%= settings.crosspost_window_hours %>">
+                  <span class="input-group-text">hours</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-exclamation-octagon"></i> Warning Threshold</h5>
-          <p class="card-text text-muted small">Number of warnings before moderators are prompted to ban.</p>
-          <div class="input-group">
-            <input type="number" name="warning_threshold" class="form-control"
-                   min="1" max="50" value="<%= settings.warning_threshold %>">
-            <span class="input-group-text">warnings</span>
+      <!-- Auto-Kick Section -->
+      <div class="settings-section" id="section-autokick">
+        <div class="section-header">
+          <i class="bi bi-door-open"></i>
+          <h5>Auto-Kick</h5>
+        </div>
+        <div class="section-body">
+          <span class="setting-hint mb-3 d-block">Automatically kick users who repeatedly crosspost within a configurable time window.</span>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-door-open"></i> Incident Count</label>
+                <span class="setting-hint">Number of crosspost incidents within the kick window that triggers an automatic kick.</span>
+                <div class="input-group">
+                  <input type="number" name="crosspost_kick_count" class="form-control"
+                         min="1" max="50" value="<%= settings.crosspost_kick_count %>">
+                  <span class="input-group-text">incidents</span>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-stopwatch"></i> Time Window</label>
+                <span class="setting-hint">Time window in which crosspost incidents are counted for the auto-kick threshold.</span>
+                <div class="input-group">
+                  <input type="number" name="crosspost_kick_window_minutes" class="form-control"
+                         min="1" max="10080" value="<%= settings.crosspost_kick_window_minutes %>">
+                  <span class="input-group-text">minutes</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-person-badge"></i> Warn Role (Trial Mod)</h5>
-          <p class="card-text text-muted small">Members with this role can issue warnings but cannot ban.</p>
-          <select name="warn_role_id" class="form-select">
-            <option value="">-- Not set --</option>
-            <% roles.forEach(role => { %>
-              <option value="<%= role.id %>" <%= settings.warn_role_id === role.id ? 'selected' : '' %>>
-                <%= role.name %>
-              </option>
-            <% }); %>
-          </select>
+      <!-- Warning System Section -->
+      <div class="settings-section" id="section-warnings">
+        <div class="section-header">
+          <i class="bi bi-exclamation-octagon"></i>
+          <h5>Warning System</h5>
         </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-hammer"></i> Ban Role</h5>
-          <p class="card-text text-muted small">Members with this role can use /ban without needing the Ban Members permission.</p>
-          <select name="ban_role_id" class="form-select">
-            <option value="">-- Not set --</option>
-            <% roles.forEach(role => { %>
-              <option value="<%= role.id %>" <%= settings.ban_role_id === role.id ? 'selected' : '' %>>
-                <%= role.name %>
-              </option>
-            <% }); %>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-clipboard-data"></i> Mod Actions Role</h5>
-          <p class="card-text text-muted small">Members with this role can view moderator action history via <code>/modactions</code>. Admins can always view.</p>
-          <select name="modactions_role_id" class="form-select">
-            <option value="">-- Not set --</option>
-            <% roles.forEach(role => { %>
-              <option value="<%= role.id %>" <%= settings.modactions_role_id === role.id ? 'selected' : '' %>>
-                <%= role.name %>
-              </option>
-            <% }); %>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-search"></i> Ban Reason Role</h5>
-          <p class="card-text text-muted small">Members with this role can use /banreason to look up why a user was banned.</p>
-          <select name="banreason_role_id" class="form-select">
-            <option value="">-- Not set --</option>
-            <% roles.forEach(role => { %>
-              <option value="<%= role.id %>" <%= settings.banreason_role_id === role.id ? 'selected' : '' %>>
-                <%= role.name %>
-              </option>
-            <% }); %>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-journal-text"></i> Warn Log Channel</h5>
-          <p class="card-text text-muted small">Channel where warning details are posted. Set to "Disabled" to turn off.</p>
-          <select name="warn_log_channel_id" class="form-select">
-            <option value="">-- Disabled --</option>
-            <% channels.forEach(ch => { %>
-              <option value="<%= ch.id %>" <%= settings.warn_log_channel_id === ch.id ? 'selected' : '' %>>
-                #<%= ch.name %>
-              </option>
-            <% }); %>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-hammer"></i> Ban Log Channel</h5>
-          <p class="card-text text-muted small">Channel where bans triggered by the warning system are logged. Set to "Disabled" to turn off.</p>
-          <select name="ban_log_channel_id" class="form-select">
-            <option value="">-- Disabled --</option>
-            <% channels.forEach(ch => { %>
-              <option value="<%= ch.id %>" <%= settings.ban_log_channel_id === ch.id ? 'selected' : '' %>>
-                #<%= ch.name %>
-              </option>
-            <% }); %>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-door-open"></i> Auto-Kick: Incident Count</h5>
-          <p class="card-text text-muted small">Number of crosspost incidents within the kick window that triggers an automatic kick.</p>
-          <div class="input-group">
-            <input type="number" name="crosspost_kick_count" class="form-control"
-                   min="1" max="50" value="<%= settings.crosspost_kick_count %>">
-            <span class="input-group-text">incidents</span>
+        <div class="section-body">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Warning Threshold</label>
+                <span class="setting-hint">Number of warnings before moderators are prompted to ban.</span>
+                <div class="input-group">
+                  <input type="number" name="warning_threshold" class="form-control"
+                         min="1" max="50" value="<%= settings.warning_threshold %>">
+                  <span class="input-group-text">warnings</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-stopwatch"></i> Auto-Kick: Time Window</h5>
-          <p class="card-text text-muted small">Time window in which crosspost incidents are counted for the auto-kick threshold.</p>
-          <div class="input-group">
-            <input type="number" name="crosspost_kick_window_minutes" class="form-control"
-                   min="1" max="10080" value="<%= settings.crosspost_kick_window_minutes %>">
-            <span class="input-group-text">minutes</span>
-          </div>
+      <!-- Exempt Channels Section -->
+      <div class="settings-section" id="section-exempt">
+        <div class="section-header">
+          <i class="bi bi-slash-circle"></i>
+          <h5>Exempt Channels</h5>
         </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-hash"></i> Exempt Channels</h5>
-          <p class="card-text text-muted small">Messages in these channels are not checked for crossposts.</p>
-          <div class="d-flex flex-wrap gap-2 mb-3" id="exempt-channels-list">
-            <% exemptChannels.forEach(chId => { %>
-              <% const ch = channels.find(c => c.id === chId); %>
-              <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 exempt-badge" data-channel-id="<%= chId %>" style="font-size: 0.875rem;">
-  #<%= ch ? ch.name : chId %>
-  <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
-          onclick="removeExemptChannel('<%= guild.id %>', '<%= chId %>', this)"></button>
-</span>
-            <% }); %>
-          </div>
-          <div class="input-group">
-            <select id="add-exempt-channel" class="form-select">
-              <option value="">-- Select channel --</option>
-              <% channels.forEach(ch => { %>
-                <% if (!exemptChannels.includes(ch.id)) { %>
-                  <option value="<%= ch.id %>">#<%= ch.name %></option>
-                <% } %>
+        <div class="section-body">
+          <div class="setting-item">
+            <span class="setting-hint">Messages in these channels are not checked for crossposts.</span>
+            <div class="d-flex flex-wrap gap-2 mb-3" id="exempt-channels-list">
+              <% exemptChannels.forEach(chId => { %>
+                <% const ch = channels.find(c => c.id === chId); %>
+                <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 exempt-badge" data-channel-id="<%= chId %>">
+                  #<%= ch ? ch.name : chId %>
+                  <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
+                          onclick="removeExemptChannel('<%= guild.id %>', '<%= chId %>', this)"></button>
+                </span>
               <% }); %>
-            </select>
-            <button type="button" class="btn btn-outline-primary"
-                    onclick="addExemptChannel('<%= guild.id %>')">Add</button>
+            </div>
+            <div class="input-group">
+              <select id="add-exempt-channel" class="form-select">
+                <option value="">-- Select channel --</option>
+                <% channels.forEach(ch => { %>
+                  <% if (!exemptChannels.includes(ch.id)) { %>
+                    <option value="<%= ch.id %>">#<%= ch.name %></option>
+                  <% } %>
+                <% }); %>
+              </select>
+              <button type="button" class="btn btn-outline-primary"
+                      onclick="addExemptChannel('<%= guild.id %>')">
+                <i class="bi bi-plus-lg"></i> Add
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-list-check"></i> Warning Reasons</h5>
-          <p class="card-text text-muted small">Customize the autocomplete suggestions shown when moderators use /warn. One reason per line. Leave blank to use defaults.</p>
-          <textarea name="custom_warn_reasons" class="form-control" rows="6"
-                    placeholder="Spam or flooding&#10;Inappropriate language&#10;Harassment or bullying&#10;NSFW content&#10;Advertising or self-promotion&#10;Crossposting&#10;Off-topic&#10;Impersonation&#10;Sharing personal information&#10;Trolling or disruptive behavior"><%= settings.custom_warn_reasons ? JSON.parse(settings.custom_warn_reasons).join('\n') : '' %></textarea>
-          <a href="#" class="small text-muted mt-1 d-inline-block reset-default" data-target="custom_warn_reasons">Reset to defaults</a>
+      <!-- Modmail Section -->
+      <div class="settings-section" id="section-modmail">
+        <div class="section-header">
+          <i class="bi bi-envelope"></i>
+          <h5>Modmail</h5>
         </div>
-      </div>
-    </div>
-
-    <div class="col-12">
-      <h4 class="mt-3 mb-0"><i class="bi bi-envelope"></i> Modmail</h4>
-      <p class="text-muted small">Allow users to DM the bot to contact moderators privately.</p>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-toggle-on"></i> Enable Modmail</h5>
-          <p class="card-text text-muted small">When enabled, users can DM the bot to open a modmail thread.</p>
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" role="switch" id="modmail_enabled" name="modmail_enabled" value="on"
-                   <%= settings.modmail_enabled ? 'checked' : '' %>>
-            <label class="form-check-label" for="modmail_enabled">Enabled</label>
+        <div class="section-body">
+          <span class="setting-hint mb-3 d-block">Allow users to DM the bot to contact moderators privately.</span>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-toggle-on"></i> Enable Modmail</label>
+                <span class="setting-hint">When enabled, users can DM the bot to open a modmail thread.</span>
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" role="switch" id="modmail_enabled" name="modmail_enabled" value="on"
+                         <%= settings.modmail_enabled ? 'checked' : '' %>>
+                  <label class="form-check-label" for="modmail_enabled">Enabled</label>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-folder"></i> Modmail Category</label>
+                <span class="setting-hint">Category where modmail thread channels will be created.</span>
+                <select name="modmail_category_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% categories.forEach(cat => { %>
+                    <option value="<%= cat.id %>" <%= settings.modmail_category_id === cat.id ? 'selected' : '' %>>
+                      <%= cat.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-folder"></i> Modmail Category</h5>
-          <p class="card-text text-muted small">Category where modmail thread channels will be created.</p>
-          <select name="modmail_category_id" class="form-select">
-            <option value="">-- Not set --</option>
-            <% categories.forEach(cat => { %>
-              <option value="<%= cat.id %>" <%= settings.modmail_category_id === cat.id ? 'selected' : '' %>>
-                <%= cat.name %>
-              </option>
-            <% }); %>
-          </select>
+      <!-- File Upload Blocking Section -->
+      <div class="settings-section" id="section-fileblock">
+        <div class="section-header">
+          <i class="bi bi-file-earmark-lock"></i>
+          <h5>File Upload Blocking</h5>
         </div>
-      </div>
-    </div>
-
-    <div class="col-12">
-      <h4 class="mt-3 mb-0"><i class="bi bi-file-earmark-lock"></i> File Upload Blocking</h4>
-      <p class="text-muted small">Block uploads of files with dangerous extensions. Exempt users (admins/mods) are not affected.</p>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-toggle-on"></i> Enable File Blocking</h5>
-          <p class="card-text text-muted small">When enabled, files with blocked extensions will be automatically deleted.</p>
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" role="switch" id="file_block_enabled"
-                   name="file_block_enabled" value="1" <%= settings.file_block_enabled ? 'checked' : '' %>>
-            <label class="form-check-label" for="file_block_enabled">File blocking enabled</label>
+        <div class="section-body">
+          <span class="setting-hint mb-3 d-block">Block uploads of files with dangerous extensions. Exempt users (admins/mods) are not affected.</span>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-toggle-on"></i> Enable File Blocking</label>
+                <span class="setting-hint">When enabled, files with blocked extensions will be automatically deleted.</span>
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" role="switch" id="file_block_enabled"
+                         name="file_block_enabled" value="1" <%= settings.file_block_enabled ? 'checked' : '' %>>
+                  <label class="form-check-label" for="file_block_enabled">File blocking enabled</label>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-file-earmark-x"></i> Blocked Extensions</label>
+                <span class="setting-hint">Comma-separated list of blocked file extensions (without dots). Leave blank to use defaults.</span>
+                <textarea name="blocked_extensions" class="form-control" rows="3"
+                          placeholder="exe, bat, cmd, msi, scr, pif, com, vbs, vbe, js, jse, wsf, wsh, ps1, psm1, psd1, reg, inf, hta, cpl, msp, mst, sct, ws, dll, sys, drv, ocx, jar, apk, deb, rpm, dmg, iso, img, lnk, url, desktop"><%= settings.blocked_extensions ? JSON.parse(settings.blocked_extensions).join(', ') : '' %></textarea>
+                <a href="#" class="small mt-1 d-inline-block reset-default" data-target="blocked_extensions">Reset to default</a>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <h5 class="card-title"><i class="bi bi-file-earmark-x"></i> Blocked Extensions</h5>
-          <p class="card-text text-muted small">Comma-separated list of blocked file extensions (without dots). Leave blank to use defaults.</p>
-          <textarea name="blocked_extensions" class="form-control" rows="3"
-                    placeholder="exe, bat, cmd, msi, scr, pif, com, vbs, vbe, js, jse, wsf, wsh, ps1, psm1, psd1, reg, inf, hta, cpl, msp, mst, sct, ws, dll, sys, drv, ocx, jar, apk, deb, rpm, dmg, iso, img, lnk, url, desktop"><%= settings.blocked_extensions ? JSON.parse(settings.blocked_extensions).join(', ') : '' %></textarea>
-          <a href="#" class="small text-muted mt-1 d-inline-block reset-default" data-target="blocked_extensions">Reset to default</a>
+      <!-- Warning Reasons Section -->
+      <div class="settings-section" id="section-warnreasons">
+        <div class="section-header">
+          <i class="bi bi-list-check"></i>
+          <h5>Warning Reasons</h5>
+        </div>
+        <div class="section-body">
+          <div class="setting-item">
+            <label class="setting-label">Custom Warning Reasons</label>
+            <span class="setting-hint">Customize the autocomplete suggestions shown when moderators use /warn. One reason per line. Leave blank to use defaults.</span>
+            <textarea name="custom_warn_reasons" class="form-control" rows="6"
+                      placeholder="Spam or flooding&#10;Inappropriate language&#10;Harassment or bullying&#10;NSFW content&#10;Advertising or self-promotion&#10;Crossposting&#10;Off-topic&#10;Impersonation&#10;Sharing personal information&#10;Trolling or disruptive behavior"><%= settings.custom_warn_reasons ? JSON.parse(settings.custom_warn_reasons).join('\n') : '' %></textarea>
+            <a href="#" class="small mt-1 d-inline-block reset-default" data-target="custom_warn_reasons">Reset to defaults</a>
+          </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-12">
-      <div class="d-flex align-items-center gap-2 mt-3 mb-0">
-        <h4 class="mb-0"><i class="bi bi-chat-quote"></i> Custom Messages</h4>
-        <button type="button" class="btn btn-sm btn-outline-info rounded-circle p-0 d-flex align-items-center justify-content-center" style="width: 24px; height: 24px;"
-                data-bs-toggle="popover" data-bs-trigger="focus" data-bs-html="true" data-bs-placement="right"
-                data-bs-title="Variables & Formatting"
-                data-bs-content="<strong>Variables</strong><br><code>{user}</code> &mdash; user mention<br><code>{count}</code> &mdash; warning count<br><br><strong>Formatting</strong><br><code>**bold**</code><br><code>*italic*</code><br><code>__underline__</code><br><code>~~strikethrough~~</code><br><code>&lt;#channel_id&gt;</code> &mdash; channel link">
-          <i class="bi bi-info" style="font-size: 14px;"></i>
+      <!-- Custom Messages Section -->
+      <div class="settings-section" id="section-messages">
+        <div class="section-header">
+          <i class="bi bi-chat-quote"></i>
+          <h5>Custom Messages</h5>
+          <button type="button" class="info-btn ms-auto"
+                  data-bs-toggle="popover" data-bs-trigger="focus" data-bs-html="true" data-bs-placement="right"
+                  data-bs-title="Variables & Formatting"
+                  data-bs-content="<strong>Variables</strong><br><code>{user}</code> &mdash; user mention<br><code>{count}</code> &mdash; warning count<br><br><strong>Formatting</strong><br><code>**bold**</code><br><code>*italic*</code><br><code>__underline__</code><br><code>~~strikethrough~~</code><br><code>&lt;#channel_id&gt;</code> &mdash; channel link">
+            <i class="bi bi-info"></i>
+          </button>
+        </div>
+        <div class="section-body">
+          <span class="setting-hint mb-3 d-block">Customize the messages the bot sends. Leave blank to use the default.</span>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label class="setting-label mb-0">First Crosspost Message</label>
+                  <span class="var-badge">{user}</span>
+                </div>
+                <span class="setting-hint">Sent when a user crossposts for the first time.</span>
+                <textarea name="crosspost_first_message" class="form-control" rows="3"
+                          placeholder="{user}, please do not crosspost the same message across multiple channels. Use the channel that best fits your topic. Duplicate messages have been removed."><%= settings.crosspost_first_message || '' %></textarea>
+                <a href="#" class="small mt-1 d-inline-block reset-default" data-target="crosspost_first_message">Reset to default</a>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label class="setting-label mb-0">Repeat Crosspost Message</label>
+                  <div class="d-flex gap-1">
+                    <span class="var-badge">{user}</span>
+                    <span class="var-badge">{count}</span>
+                  </div>
+                </div>
+                <span class="setting-hint">Sent on repeat offenses with an auto-warning.</span>
+                <textarea name="crosspost_repeat_message" class="form-control" rows="3"
+                          placeholder="{user}, you have repeatedly crossposted the same message across multiple channels. This is an official warning (warning #{count}). Continued violations may result in a ban.
+Please review the channel list and post in the most appropriate channel moving forward."><%= settings.crosspost_repeat_message || '' %></textarea>
+                <a href="#" class="small mt-1 d-inline-block reset-default" data-target="crosspost_repeat_message">Reset to default</a>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label class="setting-label mb-0">Public Warning Message</label>
+                  <span class="var-badge">{user}</span>
+                </div>
+                <span class="setting-hint">Sent publicly when a moderator issues a /warn.</span>
+                <textarea name="warn_public_message" class="form-control" rows="3"
+                          placeholder="{user}, you have received an official warning."><%= settings.warn_public_message || '' %></textarea>
+                <a href="#" class="small mt-1 d-inline-block reset-default" data-target="warn_public_message">Reset to default</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Save Button -->
+      <div class="save-bar">
+        <button type="submit" class="btn btn-save-settings">
+          <i class="bi bi-check-lg"></i> Save Settings
         </button>
       </div>
-      <p class="text-muted small">Customize the messages the bot sends. Leave blank to use the default.</p>
+
     </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <h5 class="card-title">First Crosspost Message</h5>
-            <span class="badge bg-secondary"><code class="text-light">{user}</code></span>
-          </div>
-          <p class="card-text text-muted small">Sent when a user crossposts for the first time.</p>
-          <textarea name="crosspost_first_message" class="form-control" rows="3"
-                    placeholder="{user}, please do not crosspost the same message across multiple channels. Use the channel that best fits your topic. Duplicate messages have been removed."><%= settings.crosspost_first_message || '' %></textarea>
-          <a href="#" class="small text-muted mt-1 d-inline-block reset-default" data-target="crosspost_first_message">Reset to default</a>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <h5 class="card-title">Repeat Crosspost Message</h5>
-            <div class="d-flex gap-1">
-              <span class="badge bg-secondary">
-                <code class="text-light">{user}</code>
-              </span>
-              <span class="badge bg-secondary">
-                <code class="text-light">{count}</code>
-              </span>
-            </div>
-
-          </div>
-          <p class="card-text text-muted small">Sent on repeat offenses with an auto-warning.</p>
-          <textarea name="crosspost_repeat_message" class="form-control" rows="3"
-                    placeholder="{user}, you have repeatedly crossposted the same message across multiple channels. This is an official warning (warning #{count}). Continued violations may result in a ban.
-Please review the channel list and post in the most appropriate channel moving forward."><%= settings.crosspost_repeat_message || '' %></textarea>
-          <a href="#" class="small text-muted mt-1 d-inline-block reset-default" data-target="crosspost_repeat_message">Reset to default</a>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-6">
-      <div class="card bg-dark border-secondary">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <h5 class="card-title">Public Warning Message</h5>
-            <span class="badge bg-secondary"><code class="text-light">{user}</code></span>
-          </div>
-          <p class="card-text text-muted small">Sent publicly when a moderator issues a /warn.</p>
-          <textarea name="warn_public_message" class="form-control" rows="3"
-                    placeholder="{user}, you have received an official warning."><%= settings.warn_public_message || '' %></textarea>
-          <a href="#" class="small text-muted mt-1 d-inline-block reset-default" data-target="warn_public_message">Reset to default</a>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="mt-4">
-    <button type="submit" class="btn btn-primary btn-lg">
-      <i class="bi bi-check-lg"></i> Save Settings
-    </button>
   </div>
 </form>
 

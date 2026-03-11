@@ -151,7 +151,12 @@ async function deleteWarning(guildId, warningId) {
     const result = await res.json();
     if (result.success) {
       const row = document.getElementById(`warning-row-${warningId}`);
-      if (row) row.remove();
+      if (row) {
+        row.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        row.style.opacity = '0';
+        row.style.transform = 'translateX(20px)';
+        setTimeout(() => row.remove(), 300);
+      }
       showToast('Warning deleted.');
     } else {
       showToast(result.error || 'Failed', 'error');
@@ -160,3 +165,68 @@ async function deleteWarning(guildId, warningId) {
     showToast('Failed: ' + err.message, 'error');
   }
 }
+
+// Sidebar navigation scroll-spy for guild settings page
+(function () {
+  const sidebarItems = document.querySelectorAll('.sidebar-nav-item[data-section]');
+  if (!sidebarItems.length) return;
+
+  const sections = [];
+  sidebarItems.forEach(item => {
+    const sectionId = item.dataset.section;
+    const sectionEl = document.getElementById(sectionId);
+    if (sectionEl) {
+      sections.push({ item, el: sectionEl });
+    }
+  });
+
+  if (!sections.length) return;
+
+  // Click handler for sidebar items
+  sidebarItems.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      const sectionId = item.dataset.section;
+      const sectionEl = document.getElementById(sectionId);
+      if (sectionEl) {
+        const offset = 90; // navbar height + padding
+        const top = sectionEl.getBoundingClientRect().top + window.scrollY - offset;
+        window.scrollTo({ top, behavior: 'smooth' });
+
+        // Briefly highlight the section
+        sectionEl.classList.add('highlight');
+        setTimeout(() => sectionEl.classList.remove('highlight'), 1500);
+      }
+    });
+  });
+
+  // Scroll-spy: update active sidebar item based on scroll position
+  function updateActiveSidebar() {
+    const scrollY = window.scrollY + 120;
+    let currentSection = sections[0];
+
+    for (const section of sections) {
+      if (section.el.offsetTop <= scrollY) {
+        currentSection = section;
+      }
+    }
+
+    sidebarItems.forEach(i => i.classList.remove('active'));
+    if (currentSection) {
+      currentSection.item.classList.add('active');
+    }
+  }
+
+  let ticking = false;
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      window.requestAnimationFrame(() => {
+        updateActiveSidebar();
+        ticking = false;
+      });
+      ticking = true;
+    }
+  });
+
+  updateActiveSidebar();
+})();
