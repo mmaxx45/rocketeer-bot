@@ -105,6 +105,31 @@ function runMigrations() {
     db.pragma('user_version = 6');
   }
 
+  if (version < 7) {
+    logger.info('Running database migration v7: add mod_actions table');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mod_actions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        moderator_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mod_actions_guild_target ON mod_actions(guild_id, target_id);
+      CREATE INDEX IF NOT EXISTS idx_mod_actions_type ON mod_actions(guild_id, action_type);
+    `);
+    db.pragma('user_version = 7');
+  }
+
+  if (version < 8) {
+    logger.info('Running database migration v8: add banreason_role_id');
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN banreason_role_id TEXT DEFAULT NULL`);
+    db.pragma('user_version = 8');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

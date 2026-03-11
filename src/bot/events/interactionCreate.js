@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFl
 const logger = require('../../logger');
 const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
+const { addModAction } = require('../../database/modactions');
 const { canWarn, isExempt, isModerator } = require('../utils/permissions');
 const { storePendingAction, getPendingAction, deletePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
@@ -46,6 +47,8 @@ async function handleButton(interaction) {
     try {
       const member = await interaction.guild.members.fetch(pending.targetId);
       await member.ban({ reason: `Banned by ${interaction.user.tag}: accumulated warnings` });
+
+      addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, pending.reason);
 
       deletePendingAction(actionId);
 
