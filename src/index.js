@@ -49,6 +49,8 @@ client.login(config.discord.token);
 process.on('SIGINT', () => {
   logger.info('Shutting down...');
   client.destroy();
+  const { stopCleanup } = require('./database/messages');
+  stopCleanup();
   const { db } = require('./database/db');
   db.close();
   process.exit(0);

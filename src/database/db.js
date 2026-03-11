@@ -151,16 +151,4 @@ function runMigrations() {
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 
-let cleanupStmt;
-
-function cleanupMessageCache(maxHours = 48) {
-  if (!cleanupStmt) {
-    cleanupStmt = db.prepare(
-      `DELETE FROM message_cache WHERE created_at < datetime('now', '-' || ? || ' hours')`
-    );
-  }
-  const result = cleanupStmt.run(maxHours);
-  return result.changes;
-}
-
-module.exports = { db, runMigrations, cleanupMessageCache };
+module.exports = { db, runMigrations };

@@ -1,7 +1,6 @@
 const { REST, Routes } = require('discord.js');
 const config = require('../../config');
 const logger = require('../../logger');
-const { cleanupMessageCache } = require('../../database/db');
 
 async function registerCommands(client) {
   const commands = [...client.commands.values()].map(c => c.data.toJSON());
@@ -41,15 +40,5 @@ module.exports = {
       }
     }
 
-    setInterval(() => {
-      try {
-        const deleted = cleanupMessageCache(48);
-        if (deleted > 0) {
-          logger.debug(`Cleaned up ${deleted} expired cached messages`);
-        }
-      } catch (err) {
-        logger.error('Message cache cleanup failed:', err);
-      }
-    }, 30 * 60 * 1000);
   },
 };
