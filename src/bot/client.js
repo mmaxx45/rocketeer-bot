@@ -7,8 +7,9 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.DirectMessages,
   ],
-  partials: [Partials.Message, Partials.Channel],
+  partials: [Partials.Message, Partials.Channel, Partials.GuildMember],
 });
 
 module.exports = client;

@@ -33,7 +33,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, modmail_enabled, modmail_category_id } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -80,6 +80,12 @@ module.exports = function (client) {
       }
       if (warn_public_message !== undefined) {
         updateSetting(guildId, 'warn_public_message', warn_public_message.trim() || null);
+      }
+      if (modmail_enabled !== undefined) {
+        updateSetting(guildId, 'modmail_enabled', modmail_enabled === 'on' || modmail_enabled === true || modmail_enabled === '1' ? 1 : 0);
+      }
+      if (modmail_category_id !== undefined) {
+        updateSetting(guildId, 'modmail_category_id', modmail_category_id || null);
       }
 
       const settings = getSettings(guildId);
