@@ -29,6 +29,7 @@ function getStmts() {
         file_block_enabled: db.prepare(`UPDATE guild_settings SET file_block_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         blocked_extensions: db.prepare(`UPDATE guild_settings SET blocked_extensions = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         banreason_role_id: db.prepare(`UPDATE guild_settings SET banreason_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        custom_warn_reasons: db.prepare(`UPDATE guild_settings SET custom_warn_reasons = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }

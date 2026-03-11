@@ -8,6 +8,19 @@ const { storePendingAction, getPendingAction, deletePendingAction } = require('.
 const { buildWarningsEmbed } = require('../utils/embeds');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
 
+const DEFAULT_WARN_REASONS = [
+  'Spam or flooding',
+  'Inappropriate language',
+  'Harassment or bullying',
+  'NSFW content',
+  'Advertising or self-promotion',
+  'Crossposting',
+  'Off-topic',
+  'Impersonation',
+  'Sharing personal information',
+  'Trolling or disruptive behavior',
+];
+
 async function handleButton(interaction) {
   const [action, ...params] = interaction.customId.split(':');
 
@@ -436,38 +449,6 @@ async function handleButton(interaction) {
   }
 }
 
-const DEFAULT_WARN_REASONS = [
-  'Spam or flooding',
-  'Inappropriate language',
-  'Harassment or bullying',
-  'NSFW content',
-  'Advertising or self-promotion',
-  'Crossposting',
-  'Off-topic',
-  'Impersonation',
-  'Sharing personal information',
-  'Trolling or disruptive behavior',
-];
-
-async function handleAutocomplete(interaction) {
-  if (interaction.commandName !== 'warn') return;
-
-  const focused = interaction.options.getFocused(true);
-  if (focused.name !== 'reason') return;
-
-  const typed = focused.value.toLowerCase();
-  const filtered = DEFAULT_WARN_REASONS
-    .filter(r => r.toLowerCase().includes(typed))
-    .slice(0, 25)
-    .map(r => ({ name: r, value: r }));
-
-  try {
-    await interaction.respond(filtered);
-  } catch (err) {
-    logger.warn(`Failed to respond to autocomplete: ${err.message}`);
-  }
-}
-
 async function handleCommand(interaction) {
   const command = interaction.client.commands.get(interaction.commandName);
   if (!command) {
@@ -656,6 +637,34 @@ async function handleModalSubmit(interaction) {
       logger.warn(`Failed to post to warn log channel: ${err.message}`);
     }
   }
+}
+
+async function handleAutocomplete(interaction) {
+  if (interaction.commandName !== 'warn') return;
+
+  const focused = interaction.options.getFocused();
+  const guildId = interaction.guild.id;
+
+  let reasons = DEFAULT_WARN_REASONS;
+  try {
+    const settings = getSettings(guildId);
+    if (settings.custom_warn_reasons) {
+      const parsed = JSON.parse(settings.custom_warn_reasons);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        reasons = parsed;
+      }
+    }
+  } catch (err) {
+    logger.warn(`Failed to load custom warn reasons for guild ${guildId}: ${err.message}`);
+  }
+
+  const filtered = reasons
+    .filter(r => r.toLowerCase().includes(focused.toLowerCase()))
+    .slice(0, 25);
+
+  await interaction.respond(
+    filtered.map(r => ({ name: r, value: r }))
+  );
 }
 
 module.exports = {

@@ -151,8 +151,9 @@ function runMigrations() {
   }
 
   if (version < 8) {
-    logger.info('Running database migration v8: add banreason_role_id');
+    logger.info('Running database migration v8: add banreason_role_id and custom_warn_reasons');
     db.exec(`ALTER TABLE guild_settings ADD COLUMN banreason_role_id TEXT DEFAULT NULL`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN custom_warn_reasons TEXT DEFAULT NULL`);
     db.pragma('user_version = 8');
   }
 
