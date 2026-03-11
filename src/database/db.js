@@ -106,9 +106,10 @@ function runMigrations() {
   }
 
   if (version < 7) {
-    logger.info('Running database migration v7: add crosspost_kick_count and crosspost_kick_window_minutes');
+    logger.info('Running database migration v7: add crosspost kick settings and ban_role_id');
     db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_kick_count INTEGER DEFAULT 3`);
     db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_kick_window_minutes INTEGER DEFAULT 60`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN ban_role_id TEXT DEFAULT NULL`);
     db.pragma('user_version = 7');
   }
 

@@ -7,5 +7,8 @@
       "Bash(\"/c/Program Files/nodejs/npm.cmd\" install --prefix \"C:/Users/mmaxx/claude/rocketeerbot\")",
       "Bash(\"/c/Program Files/nodejs/npm.cmd\" search passport-discord)"
     ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
   }
 }
