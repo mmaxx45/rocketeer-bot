@@ -146,6 +146,34 @@
     <div class="col-md-6">
       <div class="card bg-dark border-secondary">
         <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-door-open"></i> Auto-Kick: Incident Count</h5>
+          <p class="card-text text-muted small">Number of crosspost incidents within the kick window that triggers an automatic kick.</p>
+          <div class="input-group">
+            <input type="number" name="crosspost_kick_count" class="form-control"
+                   min="1" max="50" value="<%= settings.crosspost_kick_count %>">
+            <span class="input-group-text">incidents</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-stopwatch"></i> Auto-Kick: Time Window</h5>
+          <p class="card-text text-muted small">Time window in which crosspost incidents are counted for the auto-kick threshold.</p>
+          <div class="input-group">
+            <input type="number" name="crosspost_kick_window_minutes" class="form-control"
+                   min="1" max="10080" value="<%= settings.crosspost_kick_window_minutes %>">
+            <span class="input-group-text">minutes</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card bg-dark border-secondary">
+        <div class="card-body">
           <h5 class="card-title"><i class="bi bi-hash"></i> Exempt Channels</h5>
           <p class="card-text text-muted small">Messages in these channels are not checked for crossposts.</p>
           <div class="d-flex flex-wrap gap-2 mb-3" id="exempt-channels-list">

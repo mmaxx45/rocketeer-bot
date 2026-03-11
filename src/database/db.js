@@ -105,6 +105,13 @@ function runMigrations() {
     db.pragma('user_version = 6');
   }
 
+  if (version < 7) {
+    logger.info('Running database migration v7: add crosspost_kick_count and crosspost_kick_window_minutes');
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_kick_count INTEGER DEFAULT 3`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_kick_window_minutes INTEGER DEFAULT 60`);
+    db.pragma('user_version = 7');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

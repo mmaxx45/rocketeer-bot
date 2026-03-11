@@ -4,11 +4,12 @@ const { cacheMessage, getRecentMessages, deleteMessage } = require('../../databa
 const { addWarning, getWarningCount } = require('../../database/warnings');
 const { getSimilarity, normalizeMessage, MIN_MESSAGE_LENGTH } = require('../utils/similarity');
 const { isExempt } = require('../utils/permissions');
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { db } = require('../../database/db');
 
 let addIncidentStmt;
 let countRecentIncidentsStmt;
+let countRecentIncidentsMinutesStmt;
 
 function getIncidentStmts() {
   if (!addIncidentStmt) {
@@ -18,8 +19,40 @@ function getIncidentStmts() {
     countRecentIncidentsStmt = db.prepare(
       `SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ? AND user_id = ? AND created_at > datetime('now', '-' || ? || ' hours')`
     );
+    countRecentIncidentsMinutesStmt = db.prepare(
+      `SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ? AND user_id = ? AND created_at > datetime('now', '-' || ? || ' minutes')`
+    );
   }
-  return { addIncidentStmt, countRecentIncidentsStmt };
+  return { addIncidentStmt, countRecentIncidentsStmt, countRecentIncidentsMinutesStmt };
+}
+
+function truncate(text, maxLength) {
+  if (!text) return '*[empty]*';
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 3) + '...';
+}
+
+function buildCrosspostEmbed(originalContent, originalChannelId, crosspostContent, crosspostChannelId, similarityScore, color) {
+  return new EmbedBuilder()
+    .setColor(color)
+    .addFields(
+      { name: 'Original Message', value: truncate(originalContent, 1024), inline: false },
+      { name: 'Original Channel', value: `<#${originalChannelId}>`, inline: true },
+      { name: 'Duplicate Channel', value: `<#${crosspostChannelId}>`, inline: true },
+      { name: 'Similarity', value: `${similarityScore.toFixed(1)}%`, inline: true },
+    );
+}
+
+async function sendToWarnLogChannel(guild, settings, embed) {
+  if (!settings.warn_log_channel_id) return;
+  try {
+    const logChannel = await guild.channels.fetch(settings.warn_log_channel_id);
+    if (logChannel) {
+      await logChannel.send({ embeds: [embed] });
+    }
+  } catch (err) {
+    logger.warn(`Failed to post crosspost incident to warn log channel: ${err.message}`);
+  }
 }
 
 module.exports = {
@@ -103,7 +136,7 @@ module.exports = {
     deleteMessage(bestMatch.message_id);
 
     // Record this incident first
-    const { addIncidentStmt: addInc, countRecentIncidentsStmt: countInc } = getIncidentStmts();
+    const { addIncidentStmt: addInc, countRecentIncidentsStmt: countInc, countRecentIncidentsMinutesStmt: countIncMinutes } = getIncidentStmts();
 
     // Check how many PREVIOUS incidents this user had in the window (before recording this one)
     const previousIncidentCount = countInc.get(guildId, message.author.id, repeatOffenseHours).count;
@@ -120,6 +153,16 @@ module.exports = {
       addWarning(guildId, message.author.id, message.client.user.id, `Repeated crossposting between channels (similarity: ${bestScore.toFixed(1)}%)`, 'crosspost');
       const warningCount = getWarningCount(guildId, message.author.id);
 
+      // Build crosspost detail embed for the warning message
+      const detailEmbed = buildCrosspostEmbed(
+        bestMatch.content, bestMatch.channel_id,
+        message.content, message.channel.id,
+        bestScore, 0xFF0000 // Red for repeat offense
+      );
+      detailEmbed.setTitle('Crosspost Detected - Repeat Offense');
+      detailEmbed.setFooter({ text: `Warning #${warningCount}` });
+      detailEmbed.setTimestamp();
+
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`view_warnings:${message.author.id}`)
@@ -134,10 +177,67 @@ module.exports = {
       try {
         await message.channel.send({
           content: repeatMsg,
+          embeds: [detailEmbed],
           components: [row],
         });
       } catch (err) {
         logger.warn(`Failed to send warning message: ${err.message}`);
+      }
+
+      // Log to warn log channel
+      const logEmbed = buildCrosspostEmbed(
+        bestMatch.content, bestMatch.channel_id,
+        message.content, message.channel.id,
+        bestScore, 0xFF0000
+      );
+      logEmbed.setTitle('Crosspost Incident - Warning Issued');
+      logEmbed.setDescription(`**User:** <@${message.author.id}> (${message.author.id})\n**Action:** Warning #${warningCount} issued`);
+      logEmbed.setTimestamp();
+
+      await sendToWarnLogChannel(message.guild, settings, logEmbed);
+
+      // Feature 3: Auto-kick check
+      const kickCount = settings.crosspost_kick_count || 3;
+      const kickWindowMinutes = settings.crosspost_kick_window_minutes || 60;
+
+      // Count incidents in the kick window (including the one we just recorded)
+      const recentIncidentCount = countIncMinutes.get(guildId, message.author.id, kickWindowMinutes).count;
+
+      if (recentIncidentCount >= kickCount) {
+        try {
+          const kickMember = await message.guild.members.fetch(message.author.id);
+          if (kickMember.kickable) {
+            await kickMember.kick(`Auto-kicked: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
+            logger.info(`Auto-kicked user ${message.author.tag} from ${guildId}: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
+
+            try {
+              await message.channel.send({
+                content: `<@${message.author.id}> has been automatically kicked for repeated crossposting (${recentIncidentCount} incidents in ${kickWindowMinutes} minutes).`,
+              });
+            } catch (err) {
+              logger.warn(`Failed to send kick notification: ${err.message}`);
+            }
+
+            // Log the kick to warn log channel
+            const kickLogEmbed = new EmbedBuilder()
+              .setTitle('User Auto-Kicked - Crosspost Violations')
+              .setColor(0xDC143C)
+              .setDescription(`**User:** <@${message.author.id}> (${message.author.id})`)
+              .addFields(
+                { name: 'Incidents in Window', value: `${recentIncidentCount}`, inline: true },
+                { name: 'Kick Threshold', value: `${kickCount}`, inline: true },
+                { name: 'Window', value: `${kickWindowMinutes} minutes`, inline: true },
+                { name: 'Total Warnings', value: `${warningCount}`, inline: true },
+              )
+              .setTimestamp();
+
+            await sendToWarnLogChannel(message.guild, settings, kickLogEmbed);
+          } else {
+            logger.warn(`Cannot kick user ${message.author.tag} in ${guildId}: bot lacks permission or user has higher role`);
+          }
+        } catch (err) {
+          logger.error(`Failed to auto-kick user ${message.author.id}:`, err);
+        }
       }
     } else {
       // First offense in this window
@@ -148,6 +248,16 @@ module.exports = {
         bestScore, 'deleted'
       );
 
+      // Build crosspost detail embed for the first-offense notification
+      const detailEmbed = buildCrosspostEmbed(
+        bestMatch.content, bestMatch.channel_id,
+        message.content, message.channel.id,
+        bestScore, 0xFFA500 // Orange for first offense
+      );
+      detailEmbed.setTitle('Crosspost Detected');
+      detailEmbed.setFooter({ text: 'First offense - messages deleted' });
+      detailEmbed.setTimestamp();
+
       const firstMsg = settings.crosspost_first_message
         ? settings.crosspost_first_message.replace(/\{user\}/g, `<@${message.author.id}>`)
         : `<@${message.author.id}>, please do not crosspost the same message across multiple channels. Use the channel that best fits your topic. Duplicate messages have been removed.`;
@@ -155,10 +265,23 @@ module.exports = {
       try {
         await message.channel.send({
           content: firstMsg,
+          embeds: [detailEmbed],
         });
       } catch (err) {
         logger.warn(`Failed to send notification message: ${err.message}`);
       }
+
+      // Log to warn log channel
+      const logEmbed = buildCrosspostEmbed(
+        bestMatch.content, bestMatch.channel_id,
+        message.content, message.channel.id,
+        bestScore, 0xFFA500
+      );
+      logEmbed.setTitle('Crosspost Incident - Messages Deleted');
+      logEmbed.setDescription(`**User:** <@${message.author.id}> (${message.author.id})\n**Action:** Duplicate messages deleted (first offense)`);
+      logEmbed.setTimestamp();
+
+      await sendToWarnLogChannel(message.guild, settings, logEmbed);
     }
   },
 };
