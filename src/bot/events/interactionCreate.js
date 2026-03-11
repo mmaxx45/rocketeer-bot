@@ -2,7 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFl
 const logger = require('../../logger');
 const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
-const { canWarn, isExempt, isModerator } = require('../utils/permissions');
+const { canWarn, canBan, isExempt, isModerator } = require('../utils/permissions');
 const { storePendingAction, getPendingAction, deletePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
 
@@ -168,6 +168,91 @@ async function handleButton(interaction) {
         logger.warn(`Failed to post to warn log channel: ${err.message}`);
       }
     }
+    return;
+  }
+
+  if (action === 'confirm_ban') {
+    const actionId = params[0];
+    const pending = getPendingAction(actionId);
+
+    if (!pending) {
+      return interaction.reply({ content: 'This action has expired. Please run the command again.', ephemeral: true });
+    }
+
+    if (interaction.user.id !== pending.moderatorId) {
+      return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
+    }
+
+    try {
+      const member = await interaction.guild.members.fetch(pending.targetId);
+      const deleteMessageSeconds = (pending.deleteMessageDays || 0) * 86400;
+      await member.ban({
+        reason: `Banned by ${interaction.user.tag}: ${pending.reason}`,
+        deleteMessageSeconds,
+      });
+
+      deletePendingAction(actionId);
+
+      await interaction.update({
+        content: `<@${pending.targetId}> has been banned.\n**Reason:** ${pending.reason}`,
+        embeds: [],
+        components: [],
+      });
+
+      // Post public message in channel
+      try {
+        await interaction.channel.send({
+          content: `<@${pending.targetId}> has been banned from the server.\n**Reason:** ${pending.reason}`,
+        });
+      } catch (err) {
+        logger.warn(`Failed to send public ban notification: ${err.message}`);
+      }
+
+      // Log to ban log channel
+      const settings = getSettings(interaction.guild.id);
+      if (settings.ban_log_channel_id) {
+        try {
+          const logChannel = await interaction.guild.channels.fetch(settings.ban_log_channel_id);
+          if (logChannel) {
+            const warnings = getWarnings(interaction.guild.id, pending.targetId);
+            const logEmbed = new EmbedBuilder()
+              .setTitle('User Banned')
+              .setColor(0xFF0000)
+              .addFields(
+                { name: 'User', value: `<@${pending.targetId}> (${pending.targetId})`, inline: true },
+                { name: 'Banned by', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'Total Warnings', value: `${warnings.length}`, inline: true },
+                { name: 'Reason', value: pending.reason },
+                { name: 'Messages Deleted', value: `${pending.deleteMessageDays || 0} day(s)`, inline: true },
+              )
+              .setTimestamp();
+            await logChannel.send({ embeds: [logEmbed] });
+          }
+        } catch (err) {
+          logger.warn(`Failed to post to ban log channel: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      logger.error(`Failed to ban user ${pending.targetId}:`, err);
+      await interaction.reply({ content: `Failed to ban user: ${err.message}`, ephemeral: true });
+    }
+    return;
+  }
+
+  if (action === 'cancel_ban') {
+    const actionId = params[0];
+    const pending = getPendingAction(actionId);
+
+    if (pending && interaction.user.id !== pending.moderatorId) {
+      return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
+    }
+
+    deletePendingAction(actionId);
+    await interaction.update({
+      content: 'Ban cancelled.',
+      embeds: [],
+      components: [],
+    });
     return;
   }
 

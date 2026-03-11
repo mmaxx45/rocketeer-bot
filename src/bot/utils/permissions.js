@@ -45,4 +45,14 @@ function canWarn(member, settings) {
   return false;
 }
 
-module.exports = { isExempt, isModerator, canWarn };
+function canBan(member, settings) {
+  if (!member) return false;
+  if (member.permissions.has(PermissionFlagsBits.BanMembers)) return true;
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
+  if (settings && settings.ban_role_id) {
+    return member.roles.cache.has(settings.ban_role_id);
+  }
+  return false;
+}
+
+module.exports = { isExempt, isModerator, canWarn, canBan };
