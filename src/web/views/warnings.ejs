@@ -26,6 +26,7 @@
           <th>#</th>
           <th>User ID</th>
           <th>Reason</th>
+          <th>Message</th>
           <th>Type</th>
           <th>Issued By</th>
           <th>Date</th>
@@ -38,6 +39,13 @@
             <td><%= w.id %></td>
             <td><code><%= w.user_id %></code></td>
             <td><%= w.reason %></td>
+            <td>
+              <% if (w.message_content) { %>
+                <span class="text-muted" title="<%= w.message_content %>"><%= w.message_content.length > 50 ? w.message_content.slice(0, 50) + '...' : w.message_content %></span>
+              <% } else { %>
+                <span class="text-muted">--</span>
+              <% } %>
+            </td>
             <td>
               <span class="badge <%= w.type === 'crosspost' ? 'bg-warning text-dark' : 'bg-info' %>">
                 <%= w.type %>

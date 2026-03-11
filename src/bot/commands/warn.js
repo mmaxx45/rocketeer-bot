@@ -14,7 +14,7 @@ module.exports = {
       opt.setName('user').setDescription('The user to warn').setRequired(true)
     )
     .addStringOption(opt =>
-      opt.setName('reason').setDescription('Reason for the warning').setRequired(true)
+      opt.setName('reason').setDescription('Reason for the warning').setRequired(true).setAutocomplete(true)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 

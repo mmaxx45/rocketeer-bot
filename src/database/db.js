@@ -105,6 +105,12 @@ function runMigrations() {
     db.pragma('user_version = 6');
   }
 
+  if (version < 7) {
+    logger.info('Running database migration v7: add message_content to warnings');
+    db.exec(`ALTER TABLE warnings ADD COLUMN message_content TEXT DEFAULT NULL`);
+    db.pragma('user_version = 7');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 
