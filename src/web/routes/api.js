@@ -33,7 +33,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, custom_warn_reasons } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -80,6 +80,14 @@ module.exports = function (client) {
       }
       if (warn_public_message !== undefined) {
         updateSetting(guildId, 'warn_public_message', warn_public_message.trim() || null);
+      }
+      if (custom_warn_reasons !== undefined) {
+        const lines = custom_warn_reasons.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        if (lines.length > 0) {
+          updateSetting(guildId, 'custom_warn_reasons', JSON.stringify(lines));
+        } else {
+          updateSetting(guildId, 'custom_warn_reasons', null);
+        }
       }
 
       const settings = getSettings(guildId);

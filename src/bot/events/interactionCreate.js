@@ -6,6 +6,19 @@ const { canWarn, isExempt, isModerator } = require('../utils/permissions');
 const { storePendingAction, getPendingAction, deletePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
 
+const DEFAULT_WARN_REASONS = [
+  'Spam or flooding',
+  'Inappropriate language',
+  'Harassment or bullying',
+  'NSFW content',
+  'Advertising or self-promotion',
+  'Crossposting',
+  'Off-topic',
+  'Impersonation',
+  'Sharing personal information',
+  'Trolling or disruptive behavior',
+];
+
 async function handleButton(interaction) {
   const [action, ...params] = interaction.customId.split(':');
 
@@ -354,11 +367,42 @@ async function handleModalSubmit(interaction) {
   }
 }
 
+async function handleAutocomplete(interaction) {
+  if (interaction.commandName !== 'warn') return;
+
+  const focused = interaction.options.getFocused();
+  const guildId = interaction.guild.id;
+
+  let reasons = DEFAULT_WARN_REASONS;
+  try {
+    const settings = getSettings(guildId);
+    if (settings.custom_warn_reasons) {
+      const parsed = JSON.parse(settings.custom_warn_reasons);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        reasons = parsed;
+      }
+    }
+  } catch (err) {
+    logger.warn(`Failed to load custom warn reasons for guild ${guildId}: ${err.message}`);
+  }
+
+  const filtered = reasons
+    .filter(r => r.toLowerCase().includes(focused.toLowerCase()))
+    .slice(0, 25);
+
+  await interaction.respond(
+    filtered.map(r => ({ name: r, value: r }))
+  );
+}
+
 module.exports = {
   name: 'interactionCreate',
   async execute(interaction) {
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
       return handleCommand(interaction);
+    }
+    if (interaction.isAutocomplete()) {
+      return handleAutocomplete(interaction);
     }
     if (interaction.isButton()) {
       return handleButton(interaction);
