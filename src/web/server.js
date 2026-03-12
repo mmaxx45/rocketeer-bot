@@ -27,16 +27,16 @@ function createWebServer(client) {
   const headerFn = ejs.compile(headerTpl);
   const footerFn = ejs.compile(footerTpl);
 
-  // Security headers
+  // Security headers (compatible with Cloudflare proxy)
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://ajax.cloudflare.com", "https://static.cloudflareinsights.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
         fontSrc: ["'self'", "https://cdn.jsdelivr.net"],
         imgSrc: ["'self'", "https://cdn.discordapp.com", "data:"],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", "https://cloudflareinsights.com"],
       },
     },
   }));
