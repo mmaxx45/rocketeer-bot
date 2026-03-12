@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const logger = require('../../logger');
 const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
@@ -551,6 +551,24 @@ async function handleButton(interaction) {
     return;
   }
 
+  if (action === 'request_hwid_reset') {
+    const modal = new ModalBuilder()
+      .setCustomId('hwid_reset_modal')
+      .setTitle('Request HWID Reset');
+
+    const reasonInput = new TextInputBuilder()
+      .setCustomId('reason')
+      .setLabel('Reason for HWID reset')
+      .setPlaceholder('e.g. Got a new PC')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(200);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+    await interaction.showModal(modal);
+    return;
+  }
+
   if (action === 'modactions_page') {
     const targetUserId = params[0];
     const page = parseInt(params[1], 10);
@@ -665,7 +683,90 @@ async function handleCommand(interaction) {
   }
 }
 
+async function handleHwidResetModal(interaction) {
+  const config = require('../../config');
+  const reason = interaction.fields.getTextInputValue('reason');
+
+  if (!config.licensing.apiUrl || !config.licensing.apiKey) {
+    return interaction.reply({ content: 'HWID reset is not configured. Please contact an admin.', ephemeral: true });
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    // Look up the user's license
+    const searchRes = await fetch(
+      `${config.licensing.apiUrl}/api/v1/licenses?search=${encodeURIComponent(interaction.user.username)}`,
+      { headers: { 'Authorization': `Bearer ${config.licensing.apiKey}` } }
+    );
+
+    if (!searchRes.ok) {
+      logger.error(`License search API error: ${searchRes.status}`);
+      return interaction.editReply({ content: 'Failed to look up your license. Please contact an admin.' });
+    }
+
+    const searchData = await searchRes.json();
+    const licenses = searchData.licenses || searchData.data || searchData;
+    const list = Array.isArray(licenses) ? licenses : [];
+
+    // Find an active or suspended license
+    const license = list.find(l => l.status === 'active' || l.status === 'suspended');
+    if (!license) {
+      return interaction.editReply({ content: 'You don\'t have an active license. If you believe this is an error, please contact an admin.' });
+    }
+
+    // Submit the HWID reset (public endpoint, no auth)
+    const resetRes = await fetch(`${config.licensing.apiUrl}/api/v1/hwid-reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        license_key: license.license_key,
+        reason,
+      }),
+    });
+
+    const resetData = await resetRes.json();
+
+    if (resetRes.ok) {
+      await interaction.editReply({ content: `Your HWID has been reset successfully. You can now activate on your new device.\n**Reason:** ${reason}` });
+      logger.info(`HWID reset for ${interaction.user.tag} (license: ${license.license_key.slice(0, 4)}...) reason: ${reason}`);
+
+      // Log to ticket log channel if configured
+      const settings = getSettings(interaction.guild.id);
+      if (settings.ticket_log_channel_id) {
+        try {
+          const logChannel = await interaction.guild.channels.fetch(settings.ticket_log_channel_id);
+          if (logChannel) {
+            const logEmbed = new EmbedBuilder()
+              .setTitle('HWID Reset')
+              .setColor(0xE67E22)
+              .addFields(
+                { name: 'User', value: `<@${interaction.user.id}> (${interaction.user.username})`, inline: true },
+                { name: 'Reason', value: reason, inline: true },
+              )
+              .setTimestamp();
+            await logChannel.send({ embeds: [logEmbed] });
+          }
+        } catch (err) {
+          logger.warn(`Failed to log HWID reset: ${err.message}`);
+        }
+      }
+    } else {
+      const errorMsg = resetData.error || resetData.message || 'Unknown error';
+      await interaction.editReply({ content: `HWID reset failed: ${errorMsg}` });
+      logger.warn(`HWID reset failed for ${interaction.user.tag}: ${errorMsg}`);
+    }
+  } catch (err) {
+    logger.error(`HWID reset error: ${err.message}`);
+    await interaction.editReply({ content: `Failed to process HWID reset: ${err.message}` });
+  }
+}
+
 async function handleModalSubmit(interaction) {
+  if (interaction.customId === 'hwid_reset_modal') {
+    return handleHwidResetModal(interaction);
+  }
+
   if (!interaction.customId.startsWith('warn_modal:')) return;
 
   const [, targetUserId, messageId, channelId] = interaction.customId.split(':');
