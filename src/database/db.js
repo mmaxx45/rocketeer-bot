@@ -12,6 +12,17 @@ const db = new Database(path.resolve(config.database.path));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+function columnExists(table, column) {
+  const cols = db.pragma(`table_info(${table})`);
+  return cols.some(c => c.name === column);
+}
+
+function safeAddColumn(table, column, type) {
+  if (!columnExists(table, column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
 function runMigrations() {
   const version = db.pragma('user_version', { simple: true });
 
@@ -75,44 +86,44 @@ function runMigrations() {
 
   if (version < 2) {
     logger.info('Running database migration v2: add warn_log_channel_id');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN warn_log_channel_id TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'warn_log_channel_id', 'TEXT DEFAULT NULL');
     db.pragma('user_version = 2');
   }
 
   if (version < 3) {
     logger.info('Running database migration v3: add warn_role_id');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN warn_role_id TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'warn_role_id', 'TEXT DEFAULT NULL');
     db.pragma('user_version = 3');
   }
 
   if (version < 4) {
     logger.info('Running database migration v4: add custom message columns');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_first_message TEXT DEFAULT NULL`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_repeat_message TEXT DEFAULT NULL`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN warn_public_message TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'crosspost_first_message', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'crosspost_repeat_message', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'warn_public_message', 'TEXT DEFAULT NULL');
     db.pragma('user_version = 4');
   }
 
   if (version < 5) {
     logger.info('Running database migration v5: add crosspost_detection_seconds');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_detection_seconds INTEGER DEFAULT 30`);
+    safeAddColumn('guild_settings', 'crosspost_detection_seconds', 'INTEGER DEFAULT 30');
     db.pragma('user_version = 5');
   }
 
   if (version < 6) {
     logger.info('Running database migration v6: add ban_log_channel_id');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN ban_log_channel_id TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'ban_log_channel_id', 'TEXT DEFAULT NULL');
     db.pragma('user_version = 6');
   }
 
   if (version < 7) {
     logger.info('Running database migration v7: new features batch');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_kick_count INTEGER DEFAULT 3`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN crosspost_kick_window_minutes INTEGER DEFAULT 60`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN ban_role_id TEXT DEFAULT NULL`);
-    db.exec(`ALTER TABLE warnings ADD COLUMN message_content TEXT DEFAULT NULL`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN modmail_enabled INTEGER DEFAULT 0`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN modmail_category_id TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'crosspost_kick_count', 'INTEGER DEFAULT 3');
+    safeAddColumn('guild_settings', 'crosspost_kick_window_minutes', 'INTEGER DEFAULT 60');
+    safeAddColumn('guild_settings', 'ban_role_id', 'TEXT DEFAULT NULL');
+    safeAddColumn('warnings', 'message_content', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'modmail_enabled', 'INTEGER DEFAULT 0');
+    safeAddColumn('guild_settings', 'modmail_category_id', 'TEXT DEFAULT NULL');
     db.exec(`
       CREATE TABLE IF NOT EXISTS modmail_threads (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,30 +155,30 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_mod_actions_guild_target ON mod_actions(guild_id, target_id);
       CREATE INDEX IF NOT EXISTS idx_mod_actions_type ON mod_actions(guild_id, action_type);
     `);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN modactions_role_id TEXT DEFAULT NULL`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN file_block_enabled INTEGER DEFAULT 1`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN blocked_extensions TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'modactions_role_id', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'file_block_enabled', 'INTEGER DEFAULT 1');
+    safeAddColumn('guild_settings', 'blocked_extensions', 'TEXT DEFAULT NULL');
     db.pragma('user_version = 7');
   }
 
   if (version < 8) {
     logger.info('Running database migration v8: add banreason_role_id and custom_warn_reasons');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN banreason_role_id TEXT DEFAULT NULL`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN custom_warn_reasons TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'banreason_role_id', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'custom_warn_reasons', 'TEXT DEFAULT NULL');
     db.pragma('user_version = 8');
   }
 
   if (version < 9) {
     logger.info('Running database migration v9: add bot_status_message');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN bot_status_message TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'bot_status_message', 'TEXT DEFAULT NULL');
     db.pragma('user_version = 9');
   }
 
   if (version < 10) {
     logger.info('Running database migration v10: licensing tickets');
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN ticket_category_id TEXT DEFAULT NULL`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN ticket_admin_role_id TEXT DEFAULT NULL`);
-    db.exec(`ALTER TABLE guild_settings ADD COLUMN ticket_log_channel_id TEXT DEFAULT NULL`);
+    safeAddColumn('guild_settings', 'ticket_category_id', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'ticket_admin_role_id', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'ticket_log_channel_id', 'TEXT DEFAULT NULL');
     db.exec(`
       CREATE TABLE IF NOT EXISTS license_tickets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

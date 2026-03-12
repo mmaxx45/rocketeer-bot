@@ -4,7 +4,7 @@ const { getWarnings, getWarningCount, addWarning } = require('../../database/war
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
 const { canWarn, canBan, isExempt, isModerator, canViewModActions } = require('../utils/permissions');
-const { storePendingAction, getPendingAction, deletePendingAction } = require('../utils/pendingActions');
+const { storePendingAction, consumePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
 const { parseDuration, formatDuration } = require('../utils/parseDuration');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
@@ -22,6 +22,25 @@ const DEFAULT_WARN_REASONS = [
   'Sharing personal information',
   'Trolling or disruptive behavior',
 ];
+
+// Per-user cooldown for rate-limited operations (tickets, HWID resets)
+const cooldowns = new Map();
+const COOLDOWN_MS = 30 * 1000; // 30 seconds
+
+function checkCooldown(userId, action) {
+  const key = `${userId}:${action}`;
+  const last = cooldowns.get(key);
+  if (last && Date.now() - last < COOLDOWN_MS) return false;
+  cooldowns.set(key, Date.now());
+  // Clean up old entries periodically
+  if (cooldowns.size > 1000) {
+    const now = Date.now();
+    for (const [k, v] of cooldowns) {
+      if (now - v > COOLDOWN_MS) cooldowns.delete(k);
+    }
+  }
+  return true;
+}
 
 async function handleButton(interaction) {
   const [action, ...params] = interaction.customId.split(':');
@@ -50,7 +69,7 @@ async function handleButton(interaction) {
 
   if (action === 'ban_user') {
     const actionId = params[0];
-    const pending = getPendingAction(actionId);
+    const pending = consumePendingAction(actionId);
 
     if (!pending) {
       return interaction.reply({ content: 'This action has expired. Please run the command again.', flags: MessageFlags.Ephemeral });
@@ -66,11 +85,24 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'You no longer have permission to ban.', flags: MessageFlags.Ephemeral });
     }
 
+    // Re-check target is not now exempt (e.g. promoted to mod)
     try {
-      const member = await interaction.guild.members.fetch(pending.targetId);
-      await member.ban({ reason: `Banned by ${interaction.user.tag}: ${pending.reason}` });
+      const targetMember = await interaction.guild.members.fetch(pending.targetId);
+      if (isExempt(targetMember, settings)) {
+        return interaction.reply({ content: 'This user is now a moderator or admin and cannot be banned.', flags: MessageFlags.Ephemeral });
+      }
+    } catch {
+      // User left the server — still bannable via guild.bans.create below
+    }
 
-      deletePendingAction(actionId);
+    try {
+      try {
+        const member = await interaction.guild.members.fetch(pending.targetId);
+        await member.ban({ reason: `Banned by ${interaction.user.username}: ${pending.reason}` });
+      } catch {
+        // User may have left — fall back to ID-based ban
+        await interaction.guild.bans.create(pending.targetId, { reason: `Banned by ${interaction.user.username}: ${pending.reason}` });
+      }
 
       try {
         addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, `Banned due to accumulated warnings: ${pending.reason}`);
@@ -114,7 +146,7 @@ async function handleButton(interaction) {
 
   if (action === 'continue_warn') {
     const actionId = params[0];
-    const pending = getPendingAction(actionId);
+    const pending = consumePendingAction(actionId);
 
     if (!pending) {
       return interaction.reply({ content: 'This action has expired. Please run the command again.', flags: MessageFlags.Ephemeral });
@@ -126,8 +158,6 @@ async function handleButton(interaction) {
 
     addWarning(interaction.guild.id, pending.targetId, pending.moderatorId, pending.reason, 'manual', pending.messageContent || null);
     const newCount = getWarningCount(interaction.guild.id, pending.targetId);
-
-    deletePendingAction(actionId);
 
     try {
       addModAction(interaction.guild.id, pending.moderatorId, 'warn', pending.targetId, pending.reason);
@@ -141,7 +171,7 @@ async function handleButton(interaction) {
     if (pending.timeoutMs) {
       try {
         const member = await interaction.guild.members.fetch(pending.targetId);
-        await member.timeout(pending.timeoutMs, `Warning by ${interaction.user.tag}: ${pending.reason}`);
+        await member.timeout(pending.timeoutMs, `Warning by ${interaction.user.username}: ${pending.reason}`);
         timeoutApplied = true;
         try {
           addModAction(interaction.guild.id, pending.moderatorId, 'timeout', pending.targetId, `${pending.timeoutLabel} — ${pending.reason}`);
@@ -238,7 +268,7 @@ async function handleButton(interaction) {
 
   if (action === 'confirm_ban') {
     const actionId = params[0];
-    const pending = getPendingAction(actionId);
+    const pending = consumePendingAction(actionId);
 
     if (!pending) {
       return interaction.reply({ content: 'This action has expired. Please run the command again.', flags: MessageFlags.Ephemeral });
@@ -248,21 +278,33 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
+    // Re-verify ban permission in case it was revoked
+    const banSettings = getSettings(interaction.guild.id);
+    if (!canBan(interaction.member, banSettings)) {
+      return interaction.reply({ content: 'You no longer have permission to ban.', flags: MessageFlags.Ephemeral });
+    }
+
     try {
-      const member = await interaction.guild.members.fetch(pending.targetId);
       const deleteMessageSeconds = (pending.deleteMessageDays || 0) * 86400;
-      await member.ban({
-        reason: `Banned by ${interaction.user.tag}: ${pending.reason}`,
-        deleteMessageSeconds,
-      });
+      try {
+        const member = await interaction.guild.members.fetch(pending.targetId);
+        await member.ban({
+          reason: `Banned by ${interaction.user.username}: ${pending.reason}`,
+          deleteMessageSeconds,
+        });
+      } catch {
+        // User may have left — fall back to ID-based ban
+        await interaction.guild.bans.create(pending.targetId, {
+          reason: `Banned by ${interaction.user.username}: ${pending.reason}`,
+          deleteMessageSeconds,
+        });
+      }
 
       try {
         addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, pending.reason);
       } catch (err) {
         logger.warn(`Failed to log mod action: ${err.message}`);
       }
-
-      deletePendingAction(actionId);
 
       await interaction.update({
         content: `<@${pending.targetId}> has been banned.\n**Reason:** ${pending.reason}`,
@@ -312,13 +354,16 @@ async function handleButton(interaction) {
 
   if (action === 'cancel_ban') {
     const actionId = params[0];
-    const pending = getPendingAction(actionId);
+    const pending = consumePendingAction(actionId);
 
-    if (pending && interaction.user.id !== pending.moderatorId) {
+    if (!pending) {
+      return interaction.reply({ content: 'This action has already expired or been completed.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (interaction.user.id !== pending.moderatorId) {
       return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
-    deletePendingAction(actionId);
     await interaction.update({
       content: 'Ban cancelled.',
       embeds: [],
@@ -329,13 +374,16 @@ async function handleButton(interaction) {
 
   if (action === 'cancel_action') {
     const actionId = params[0];
-    const pending = getPendingAction(actionId);
+    const pending = consumePendingAction(actionId);
 
-    if (pending && interaction.user.id !== pending.moderatorId) {
+    if (!pending) {
+      return interaction.reply({ content: 'This action has already expired or been completed.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (interaction.user.id !== pending.moderatorId) {
       return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
-    deletePendingAction(actionId);
     await interaction.update({
       content: 'Action cancelled.',
       embeds: [],
@@ -388,7 +436,8 @@ async function handleButton(interaction) {
       try {
         const channel = await interaction.guild.channels.fetch(channelId);
         if (channel) {
-          await channel.setName(channel.name.startsWith('closed-') ? channel.name : `closed-${channel.name}`);
+          const closedName = channel.name.startsWith('closed-') ? channel.name : `closed-${channel.name}`;
+          await channel.setName(closedName.slice(0, 100));
           // Send a final message
           await channel.send({
             embeds: [
@@ -408,7 +457,7 @@ async function handleButton(interaction) {
         logger.warn(`Failed to archive modmail channel: ${err.message}`);
       }
 
-      logger.info(`Modmail thread closed: channel=${channelId} closedBy=${interaction.user.tag}`);
+      logger.info(`Modmail thread closed: channel=${channelId} closedBy=${interaction.user.username}`);
     } catch (err) {
       logger.error(`Failed to close modmail thread: ${err.message}`);
       await interaction.reply({ content: `Failed to close thread: ${err.message}`, flags: MessageFlags.Ephemeral });
@@ -417,6 +466,10 @@ async function handleButton(interaction) {
   }
 
   if (action === 'open_license_ticket') {
+    if (!checkCooldown(interaction.user.id, 'ticket')) {
+      return interaction.reply({ content: 'Please wait before trying again.', flags: MessageFlags.Ephemeral });
+    }
+
     const settings = getSettings(interaction.guild.id);
 
     if (!settings.ticket_category_id) {
@@ -476,7 +529,7 @@ async function handleButton(interaction) {
       }
 
       await interaction.editReply({ content: `Your ticket has been created: <#${channel.id}>` });
-      logger.info(`License ticket created: channel=${channel.name} user=${interaction.user.tag}`);
+      logger.info(`License ticket created: channel=${channel.name} user=${interaction.user.username}`);
     } catch (err) {
       logger.error(`Failed to create ticket channel: ${err.message}`);
       await interaction.editReply({ content: `Failed to create ticket: ${err.message}` });
@@ -520,7 +573,7 @@ async function handleButton(interaction) {
           }
           const transcript = allMessages
             .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-            .map(m => `[${m.createdAt.toISOString()}] ${m.author.tag}: ${m.content || '(embed/attachment)'}`)
+            .map(m => `[${m.createdAt.toISOString()}] ${m.author.username}: ${m.content || '(embed/attachment)'}`)
             .join('\n');
 
           const logEmbed = new EmbedBuilder()
@@ -569,11 +622,15 @@ async function handleButton(interaction) {
       }
     }, 5000);
 
-    logger.info(`Ticket closed via button: channel=${interaction.channel.name} closedBy=${interaction.user.tag}`);
+    logger.info(`Ticket closed via button: channel=${interaction.channel.name} closedBy=${interaction.user.username}`);
     return;
   }
 
   if (action === 'request_hwid_reset') {
+    if (!checkCooldown(interaction.user.id, 'hwid_reset')) {
+      return interaction.reply({ content: 'Please wait before trying again.', flags: MessageFlags.Ephemeral });
+    }
+
     const modal = new ModalBuilder()
       .setCustomId('hwid_reset_modal')
       .setTitle('Request HWID Reset');
@@ -616,7 +673,7 @@ async function handleButton(interaction) {
       targetUser = { id: targetUserId, tag: `Unknown (${targetUserId})`, username: `Unknown (${targetUserId})` };
     }
 
-    const displayName = targetUser.tag || targetUser.username || `User ${targetUser.id}`;
+    const displayName = targetUser.username || `User ${targetUser.id}`;
     const embed = new EmbedBuilder()
       .setTitle(`Mod Actions by ${displayName}`)
       .setColor(0x5865F2)
@@ -739,10 +796,10 @@ async function handleHwidResetModal(interaction) {
       return interaction.editReply({ content: 'You don\'t have an active license. If you believe this is an error, please contact an admin.' });
     }
 
-    // Submit the HWID reset (public endpoint, no auth)
+    // Submit the HWID reset
     const resetRes = await fetch(`${config.licensing.apiUrl}/api/v1/hwid-reset`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.licensing.apiKey}` },
       body: JSON.stringify({
         license_key: license.license_key,
         reason,
@@ -753,7 +810,7 @@ async function handleHwidResetModal(interaction) {
 
     if (resetRes.ok) {
       await interaction.editReply({ content: `Your HWID has been reset successfully. You can now activate on your new device.\n**Reason:** ${reason}` });
-      logger.info(`HWID reset for ${interaction.user.tag} (license: ${license.license_key.slice(0, 4)}...) reason: ${reason}`);
+      logger.info(`HWID reset for ${interaction.user.username} (license: ${license.license_key.slice(0, 4)}...) reason: ${reason}`);
 
       // Log to ticket log channel if configured
       const settings = getSettings(interaction.guild.id);
@@ -778,7 +835,7 @@ async function handleHwidResetModal(interaction) {
     } else {
       const errorMsg = resetData.error || resetData.message || 'Unknown error';
       await interaction.editReply({ content: `HWID reset failed: ${errorMsg}` });
-      logger.warn(`HWID reset failed for ${interaction.user.tag}: ${errorMsg}`);
+      logger.warn(`HWID reset failed for ${interaction.user.username}: ${errorMsg}`);
     }
   } catch (err) {
     logger.error(`HWID reset error: ${err.message}`);
@@ -843,7 +900,7 @@ async function handleModalSubmit(interaction) {
 
   if (existingWarnings.length >= warningThreshold) {
     const embed = buildWarningsEmbed(existingWarnings, targetUser, interaction.guild);
-    const displayName = targetUser.tag || targetUser.username;
+    const displayName = targetUser.username || `User ${targetUser.id}`;
     embed.setTitle(`${displayName} already has ${existingWarnings.length} warning(s)`);
     embed.setColor(0xFF0000);
     embed.setDescription(
@@ -908,7 +965,7 @@ async function handleModalSubmit(interaction) {
   if (timeoutMs) {
     try {
       const member = await interaction.guild.members.fetch(targetUserId);
-      await member.timeout(timeoutMs, `Warning by ${interaction.user.tag}: ${reason}`);
+      await member.timeout(timeoutMs, `Warning by ${interaction.user.username}: ${reason}`);
       timeoutApplied = true;
       try {
         addModAction(interaction.guild.id, interaction.user.id, 'timeout', targetUserId, `${timeoutLabel} — ${reason}`);
@@ -1032,17 +1089,28 @@ async function handleAutocomplete(interaction) {
 module.exports = {
   name: 'interactionCreate',
   async execute(interaction) {
-    if (interaction.isAutocomplete()) {
-      return handleAutocomplete(interaction);
-    }
-    if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
-      return handleCommand(interaction);
-    }
-    if (interaction.isButton()) {
-      return handleButton(interaction);
-    }
-    if (interaction.isModalSubmit()) {
-      return handleModalSubmit(interaction);
+    try {
+      if (interaction.isAutocomplete()) {
+        return await handleAutocomplete(interaction);
+      }
+      if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
+        return await handleCommand(interaction);
+      }
+      if (interaction.isButton()) {
+        return await handleButton(interaction);
+      }
+      if (interaction.isModalSubmit()) {
+        return await handleModalSubmit(interaction);
+      }
+    } catch (err) {
+      logger.error(`Unhandled interaction error (${interaction.type}):`, err);
+      try {
+        if (!interaction.isAutocomplete() && !interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An unexpected error occurred.', flags: MessageFlags.Ephemeral });
+        }
+      } catch {
+        // Interaction expired or already responded
+      }
     }
   },
 };

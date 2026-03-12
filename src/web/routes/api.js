@@ -4,20 +4,11 @@ const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getEx
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const logger = require('../../logger');
-
-const MANAGE_GUILD = BigInt(0x20);
+const { userCanManageGuild } = require('../middleware/auth');
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) return next();
   res.status(401).json({ error: 'Not authenticated' });
-}
-
-function userCanManageGuild(user, guildId) {
-  if (!user || !user.guilds) return false;
-  const guild = user.guilds.find(g => g.id === guildId);
-  if (!guild) return false;
-  const permissions = BigInt(guild.permissions);
-  return (permissions & MANAGE_GUILD) === MANAGE_GUILD;
 }
 
 function ensureGuildAccess(req, res, next) {
@@ -132,7 +123,7 @@ module.exports = function (client) {
       if (bot_status_message !== undefined) {
         const msg = bot_status_message.trim() || null;
         updateSetting(guildId, 'bot_status_message', msg);
-        // Update bot presence immediately
+        // Note: bot presence is global — last guild to save controls the status for all guilds
         try {
           if (msg) {
             client.user.setPresence({
@@ -289,16 +280,17 @@ module.exports = function (client) {
     const { buckets, bucketDays, labelFmt } = config;
 
     try {
+      const bucketStmt = db.prepare(`
+        SELECT COUNT(*) as count FROM warnings
+        WHERE guild_id = ?
+          AND created_at >= datetime('now', ? || ' days')
+          AND created_at < datetime('now', ? || ' days')
+      `);
       const data = [];
       for (let i = buckets - 1; i >= 0; i--) {
         const startDay = -(i + 1) * bucketDays;
         const endDay = -i * bucketDays;
-        const row = db.prepare(`
-          SELECT COUNT(*) as count FROM warnings
-          WHERE guild_id = ?
-            AND created_at >= datetime('now', ? || ' days')
-            AND created_at < datetime('now', ? || ' days')
-        `).get(guildId, String(startDay), String(endDay));
+        const row = bucketStmt.get(guildId, String(startDay), String(endDay));
 
         const date = new Date();
         date.setDate(date.getDate() + startDay + bucketDays);

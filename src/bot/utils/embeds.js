@@ -1,7 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 
 function buildWarningsEmbed(warnings, user, guild, showModerator = true) {
-  const displayName = user.tag || user.username || `User ${user.id}`;
+  const displayName = user.username || `User ${user.id}`;
   const embed = new EmbedBuilder()
     .setTitle(`Warnings for ${displayName}`)
     .setColor(0xFFA500)
@@ -32,7 +32,14 @@ function buildWarningsEmbed(warnings, user, guild, showModerator = true) {
   if (chunk.length <= 4096) {
     embed.setDescription(chunk);
   } else {
-    embed.setDescription(lines.slice(0, 20).join('\n') + `\n\n*...and ${lines.length - 20} more*`);
+    let truncated = lines.slice(0, 20).join('\n') + `\n\n*...and ${lines.length - 20} more*`;
+    if (truncated.length > 4096) {
+      truncated = lines.slice(0, 10).join('\n') + `\n\n*...and ${lines.length - 10} more*`;
+    }
+    if (truncated.length > 4096) {
+      truncated = truncated.slice(0, 4093) + '...';
+    }
+    embed.setDescription(truncated);
   }
 
   embed.setFooter({ text: `Total: ${warnings.length} warning(s)` });

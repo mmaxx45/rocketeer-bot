@@ -32,10 +32,20 @@ module.exports = {
       try {
         const logChannel = await interaction.guild.channels.fetch(settings.ticket_log_channel_id);
         if (logChannel) {
-          const messages = await interaction.channel.messages.fetch({ limit: 100 });
-          const transcript = messages
+          let allMessages = [];
+          let lastId;
+          for (let i = 0; i < 5; i++) {
+            const opts = { limit: 100 };
+            if (lastId) opts.before = lastId;
+            const batch = await interaction.channel.messages.fetch(opts);
+            if (batch.size === 0) break;
+            allMessages.push(...batch.values());
+            lastId = batch.last().id;
+            if (batch.size < 100) break;
+          }
+          const transcript = allMessages
             .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-            .map(m => `[${m.createdAt.toISOString()}] ${m.author.tag}: ${m.content || '(embed/attachment)'}`)
+            .map(m => `[${m.createdAt.toISOString()}] ${m.author.username}: ${m.content || '(embed/attachment)'}`)
             .join('\n');
 
           const logEmbed = new EmbedBuilder()
@@ -85,6 +95,6 @@ module.exports = {
       }
     }, 5000);
 
-    logger.info(`Ticket closed: channel=${interaction.channel.name} closedBy=${interaction.user.tag}`);
+    logger.info(`Ticket closed: channel=${interaction.channel.name} closedBy=${interaction.user.username}`);
   },
 };

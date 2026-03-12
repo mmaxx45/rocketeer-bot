@@ -21,7 +21,7 @@ module.exports = {
     .addStringOption(opt =>
       opt.setName('timeout').setDescription('Optional timeout: e.g. 30s, 5m, 1h, 2d, 1w, 1mo')
     )
-    .setDefaultMemberPermissions(null),
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
     const settings = getSettings(interaction.guild.id);
@@ -60,7 +60,7 @@ module.exports = {
     // Threshold reached - show table with ban/continue buttons
     if (existingWarnings.length >= warningThreshold) {
       const embed = buildWarningsEmbed(existingWarnings, targetUser, interaction.guild);
-      const displayName = targetUser.tag || targetUser.username;
+      const displayName = targetUser.username || `User ${targetUser.id}`;
       embed.setTitle(`${displayName} already has ${existingWarnings.length} warning(s)`);
       embed.setColor(0xFF0000);
       embed.setDescription(
@@ -122,7 +122,7 @@ module.exports = {
     const timeoutLabel = timeoutMs ? formatDuration(timeoutMs) : null;
     if (timeoutMs) {
       try {
-        await targetMember.timeout(timeoutMs, `Warning by ${interaction.user.tag}: ${reason}`);
+        await targetMember.timeout(timeoutMs, `Warning by ${interaction.user.username}: ${reason}`);
         timeoutApplied = true;
         try {
           addModAction(interaction.guild.id, interaction.user.id, 'timeout', targetUser.id, `${timeoutLabel} — ${reason}`);

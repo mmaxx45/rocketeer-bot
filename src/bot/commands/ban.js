@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const { getWarnings } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { canBan, isExempt } = require('../utils/permissions');
@@ -23,7 +23,7 @@ module.exports = {
         .setMaxValue(7)
         .setRequired(false)
     )
-    .setDefaultMemberPermissions(null),
+    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
   async execute(interaction) {
     const settings = getSettings(interaction.guild.id);
@@ -48,17 +48,17 @@ module.exports = {
     try {
       targetMember = await interaction.guild.members.fetch(targetUser.id);
     } catch {
-      return interaction.reply({ content: 'Could not find that user in this server.', flags: MessageFlags.Ephemeral });
+      targetMember = null; // User may have left — still bannable
     }
 
-    if (isExempt(targetMember, settings)) {
+    if (targetMember && isExempt(targetMember, settings)) {
       return interaction.reply({ content: 'You cannot ban a moderator or admin.', flags: MessageFlags.Ephemeral });
     }
 
     // Build confirmation embed with current warnings
     const existingWarnings = getWarnings(interaction.guild.id, targetUser.id);
     const embed = buildWarningsEmbed(existingWarnings, targetUser, interaction.guild);
-    const displayName = targetUser.tag || targetUser.username;
+    const displayName = targetUser.username || `User ${targetUser.id}`;
     embed.setTitle(`Ban confirmation: ${displayName}`);
     embed.setColor(0xFF0000);
 

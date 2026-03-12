@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const { getSettings } = require('../../database/settings');
 const { getModActions } = require('../../database/modactions');
 const { canViewModActions } = require('../utils/permissions');
@@ -7,7 +7,7 @@ const logger = require('../../logger');
 const PAGE_SIZE = 10;
 
 function buildModActionsEmbed(rows, total, targetUser, page, totalPages) {
-  const displayName = targetUser.tag || targetUser.username || `User ${targetUser.id}`;
+  const displayName = targetUser.username || `User ${targetUser.id}`;
   const embed = new EmbedBuilder()
     .setTitle(`Mod Actions by ${displayName}`)
     .setColor(0x5865F2)
@@ -61,7 +61,7 @@ module.exports = {
     .addIntegerOption(opt =>
       opt.setName('page').setDescription('Page number').setRequired(false)
     )
-    .setDefaultMemberPermissions(null),
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
     const settings = getSettings(interaction.guild.id);

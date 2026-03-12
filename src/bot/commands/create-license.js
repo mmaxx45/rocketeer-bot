@@ -36,7 +36,7 @@ module.exports = {
     const targetUser = interaction.options.getUser('user');
     const days = interaction.options.getInteger('days') || null;
 
-    await interaction.deferReply();
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
       const res = await fetch(`${config.licensing.apiUrl}/api/v1/licenses`, {
@@ -96,7 +96,7 @@ module.exports = {
         }
       }
 
-      logger.info(`License created for ${targetUser.username} by ${interaction.user.tag} (${days ? days + ' days' : 'lifetime'})`);
+      logger.info(`License created for ${targetUser.username} by ${interaction.user.username} (${days ? days + ' days' : 'lifetime'})`);
     } catch (err) {
       logger.error(`Failed to create license: ${err.message}`);
       await interaction.editReply({ content: `Failed to contact licensing API: ${err.message}` });

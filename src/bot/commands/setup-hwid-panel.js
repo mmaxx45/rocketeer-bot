@@ -37,6 +37,6 @@ module.exports = {
 
     await interaction.channel.send({ embeds: [embed], components: [row] });
     await interaction.reply({ content: 'HWID reset panel posted.', flags: MessageFlags.Ephemeral });
-    logger.info(`HWID reset panel set up in #${interaction.channel.name} by ${interaction.user.tag}`);
+    logger.info(`HWID reset panel set up in #${interaction.channel.name} by ${interaction.user.username}`);
   },
 };

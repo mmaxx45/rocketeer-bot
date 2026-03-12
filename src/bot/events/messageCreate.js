@@ -123,7 +123,7 @@ async function handleDM(message) {
       if (channel) {
         const embed = new EmbedBuilder()
           .setAuthor({
-            name: message.author.tag || message.author.username,
+            name: message.author.username || message.author.username,
             iconURL: message.author.displayAvatarURL(),
           })
           .setDescription(message.content || '*No text content*')
@@ -157,7 +157,7 @@ async function handleDM(message) {
       return;
     }
 
-    const displayName = message.author.tag || message.author.username;
+    const displayName = message.author.username || message.author.username;
     const channelName = `modmail-${message.author.username.toLowerCase().replace(/[^a-z0-9]/g, '-')}`.slice(0, 100);
 
     const modmailChannel = await targetGuild.channels.create({
@@ -279,7 +279,7 @@ async function handleModmailReply(message) {
   // This is a modmail channel - relay the mod's message to the user
   try {
     const user = await message.client.users.fetch(thread.user_id);
-    const displayName = message.member?.displayName || message.author.tag || message.author.username;
+    const displayName = message.member?.displayName || message.author.username || message.author.username;
 
     const embed = new EmbedBuilder()
       .setAuthor({
@@ -376,7 +376,7 @@ module.exports = {
       }
 
       if (blockedExt) {
-        logger.info(`Blocked file upload: user=${message.author.tag} guild=${guildId} file=${blockedFilename} ext=${blockedExt}`);
+        logger.info(`Blocked file upload: user=${message.author.username} guild=${guildId} file=${blockedFilename} ext=${blockedExt}`);
 
         try {
           await message.delete();
@@ -486,7 +486,7 @@ module.exports = {
 
     if (!bestMatch) return;
 
-    logger.info(`Crosspost detected: user=${message.author.tag} guild=${guildId} similarity=${bestScore.toFixed(1)}% channel1=${bestMatch.channel_id} channel2=${message.channel.id}`);
+    logger.info(`Crosspost detected: user=${message.author.username} guild=${guildId} similarity=${bestScore.toFixed(1)}% channel1=${bestMatch.channel_id} channel2=${message.channel.id}`);
 
     // Delete both messages
     try {
@@ -604,7 +604,7 @@ module.exports = {
           const kickMember = await message.guild.members.fetch(message.author.id);
           if (kickMember.kickable) {
             await kickMember.kick(`Auto-kicked: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
-            logger.info(`Auto-kicked user ${message.author.tag} from ${guildId}: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
+            logger.info(`Auto-kicked user ${message.author.username} from ${guildId}: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
 
             try {
               addModAction(guildId, message.client.user.id, 'kick', message.author.id, `Auto-kicked: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
@@ -635,7 +635,7 @@ module.exports = {
 
             await sendToWarnLogChannel(message.guild, settings, kickLogEmbed);
           } else {
-            logger.warn(`Cannot kick user ${message.author.tag} in ${guildId}: bot lacks permission or user has higher role`);
+            logger.warn(`Cannot kick user ${message.author.username} in ${guildId}: bot lacks permission or user has higher role`);
           }
         } catch (err) {
           logger.error(`Failed to auto-kick user ${message.author.id}:`, err);

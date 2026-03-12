@@ -2,20 +2,11 @@ const express = require('express');
 const { getSettings, getExemptChannels } = require('../../database/settings');
 const { getAllGuildWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
-
-const MANAGE_GUILD = BigInt(0x20);
+const { MANAGE_GUILD, userCanManageGuild } = require('../middleware/auth');
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) return next();
   res.redirect('/');
-}
-
-function userCanManageGuild(user, guildId) {
-  if (!user || !user.guilds) return false;
-  const guild = user.guilds.find(g => g.id === guildId);
-  if (!guild) return false;
-  const permissions = BigInt(guild.permissions);
-  return (permissions & MANAGE_GUILD) === MANAGE_GUILD;
 }
 
 // In-memory username cache: id -> { name, ts }

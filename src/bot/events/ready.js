@@ -29,12 +29,16 @@ module.exports = {
   name: 'clientReady',
   once: true,
   async execute(client) {
-    logger.info(`Bot ready as ${client.user.tag}, serving ${client.guilds.cache.size} guild(s)`);
+    logger.info(`Bot ready as ${client.user.username}, serving ${client.guilds.cache.size} guild(s)`);
 
-    // Load status message from database (use first guild that has one set, or default)
+    // Load status message from the bot's first guild
     let statusMessage = 'DM for help!';
     try {
-      const row = db.prepare('SELECT bot_status_message FROM guild_settings WHERE bot_status_message IS NOT NULL ORDER BY rowid DESC LIMIT 1').get();
+      const guildIds = [...client.guilds.cache.keys()];
+      const placeholders = guildIds.map(() => '?').join(',');
+      const row = guildIds.length > 0
+        ? db.prepare(`SELECT bot_status_message FROM guild_settings WHERE guild_id IN (${placeholders}) AND bot_status_message IS NOT NULL LIMIT 1`).get(...guildIds)
+        : null;
       if (row && row.bot_status_message) {
         statusMessage = row.bot_status_message;
       }

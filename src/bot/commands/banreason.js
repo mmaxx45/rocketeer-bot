@@ -36,7 +36,7 @@ module.exports = {
     }
 
     const displayName = targetUser
-      ? (targetUser.tag || targetUser.username)
+      ? (targetUser.username || 'Unknown User')
       : `Unknown User`;
     const userMention = targetUser ? `<@${targetId}>` : `\`${targetId}\``;
 
@@ -79,6 +79,9 @@ module.exports = {
       let warningText = lines.join('\n');
       if (warningText.length > 1024) {
         warningText = lines.slice(0, 15).join('\n') + `\n\n*...and ${lines.length - 15} more*`;
+      }
+      if (warningText.length > 1024) {
+        warningText = warningText.slice(0, 1021) + '...';
       }
 
       embed.addFields({ name: `Warning History (${warnings.length})`, value: warningText });

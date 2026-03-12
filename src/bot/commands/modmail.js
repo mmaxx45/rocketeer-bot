@@ -100,7 +100,8 @@ module.exports = {
 
         // Lock the channel
         try {
-          await interaction.channel.setName(interaction.channel.name.startsWith('closed-') ? interaction.channel.name : `closed-${interaction.channel.name}`);
+          const closedName = interaction.channel.name.startsWith('closed-') ? interaction.channel.name : `closed-${interaction.channel.name}`;
+          await interaction.channel.setName(closedName.slice(0, 100));
           await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone.id, {
             SendMessages: false,
           });
@@ -108,7 +109,7 @@ module.exports = {
           logger.warn(`Failed to archive modmail channel: ${err.message}`);
         }
 
-        logger.info(`Modmail thread closed via command: channel=${interaction.channel.id} closedBy=${interaction.user.tag}`);
+        logger.info(`Modmail thread closed via command: channel=${interaction.channel.id} closedBy=${interaction.user.username}`);
       } catch (err) {
         logger.error(`Failed to close modmail thread: ${err.message}`);
         return interaction.reply({ content: `Failed to close thread: ${err.message}`, flags: MessageFlags.Ephemeral });
@@ -130,10 +131,15 @@ module.exports = {
         lines.push(`<#${t.channel_id}> - ${userName} - Opened <t:${createdAt}:R>`);
       }
 
+      let description = lines.join('\n');
+      if (description.length > 4096) {
+        description = description.slice(0, 4093) + '...';
+      }
+
       const embed = new EmbedBuilder()
         .setTitle(`Open Modmail Threads (${threads.length})`)
         .setColor(0x3498DB)
-        .setDescription(lines.join('\n'))
+        .setDescription(description)
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });

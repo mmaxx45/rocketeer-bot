@@ -38,7 +38,7 @@ logger.info(`Loaded ${eventFiles.length} event handler(s)`);
 
 // 4. Start web server
 const app = createWebServer(client);
-app.listen(config.web.port, () => {
+const server = app.listen(config.web.port, () => {
   logger.info(`Web dashboard running on http://localhost:${config.web.port}`);
 });
 
@@ -46,9 +46,10 @@ app.listen(config.web.port, () => {
 client.login(config.discord.token);
 
 // 6. Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info('Shutting down...');
-  client.destroy();
+  server.close();
+  await client.destroy();
   const { stopCleanup } = require('./database/messages');
   stopCleanup();
   const { db } = require('./database/db');
