@@ -163,6 +163,30 @@ function runMigrations() {
     db.pragma('user_version = 9');
   }
 
+  if (version < 10) {
+    logger.info('Running database migration v10: licensing tickets');
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN ticket_category_id TEXT DEFAULT NULL`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN ticket_admin_role_id TEXT DEFAULT NULL`);
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN ticket_log_channel_id TEXT DEFAULT NULL`);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS license_tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
+        created_at TEXT DEFAULT (datetime('now')),
+        closed_at TEXT DEFAULT NULL,
+        closed_by TEXT DEFAULT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_license_tickets_guild_user ON license_tickets(guild_id, user_id);
+      CREATE INDEX IF NOT EXISTS idx_license_tickets_channel ON license_tickets(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_license_tickets_status ON license_tickets(guild_id, status);
+    `);
+    db.pragma('user_version = 10');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 
