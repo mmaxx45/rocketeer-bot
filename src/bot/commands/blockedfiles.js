@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { getSettings } = require('../../database/settings');
 const { isModerator } = require('../utils/permissions');
 const { getBlockedExtensions, DEFAULT_BLOCKED_EXTENSIONS } = require('../utils/fileFilter');
@@ -13,7 +13,7 @@ module.exports = {
     const settings = getSettings(interaction.guild.id);
 
     if (!isModerator(interaction.member, settings)) {
-      return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     const enabled = settings.file_block_enabled;
@@ -26,6 +26,6 @@ module.exports = {
     content += `**Extension list:** ${isCustom ? 'Custom' : 'Default'}\n\n`;
     content += `\`\`\`\n${extList}\n\`\`\``;
 
-    return interaction.reply({ content, ephemeral: true });
+    return interaction.reply({ content, flags: MessageFlags.Ephemeral });
   },
 };

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require('discord.js');
 const { addWarning, getWarnings, getWarningCount } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
@@ -27,7 +27,7 @@ module.exports = {
     const settings = getSettings(interaction.guild.id);
 
     if (!canWarn(interaction.member, settings)) {
-      return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     const targetUser = interaction.options.getUser('user');
@@ -36,22 +36,22 @@ module.exports = {
     const timeoutMs = timeoutInput ? parseDuration(timeoutInput) : null;
 
     if (timeoutInput && !timeoutMs) {
-      return interaction.reply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.', ephemeral: true });
+      return interaction.reply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.', flags: MessageFlags.Ephemeral });
     }
 
     if (targetUser.bot) {
-      return interaction.reply({ content: 'You cannot warn a bot.', ephemeral: true });
+      return interaction.reply({ content: 'You cannot warn a bot.', flags: MessageFlags.Ephemeral });
     }
 
     let targetMember;
     try {
       targetMember = await interaction.guild.members.fetch(targetUser.id);
     } catch {
-      return interaction.reply({ content: 'Could not find that user in this server.', ephemeral: true });
+      return interaction.reply({ content: 'Could not find that user in this server.', flags: MessageFlags.Ephemeral });
     }
 
     if (isExempt(targetMember, settings)) {
-      return interaction.reply({ content: 'You cannot warn a moderator or someone with a higher role.', ephemeral: true });
+      return interaction.reply({ content: 'You cannot warn a moderator or someone with a higher role.', flags: MessageFlags.Ephemeral });
     }
 
     const existingWarnings = getWarnings(interaction.guild.id, targetUser.id);
@@ -102,7 +102,7 @@ module.exports = {
         content: `**New warning reason:** ${reason}`,
         embeds: [embed],
         components: [row],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -144,7 +144,7 @@ module.exports = {
 
     await interaction.reply({
       content: replyContent,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
 
     const row = new ActionRowBuilder().addComponents(

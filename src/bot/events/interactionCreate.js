@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } = require('discord.js');
 const logger = require('../../logger');
 const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
@@ -32,7 +32,7 @@ async function handleButton(interaction) {
     const modViewing = isModerator(interaction.member, settings);
 
     if (interaction.user.id !== targetUserId && !modViewing) {
-      return interaction.reply({ content: 'This button is not for you.', ephemeral: true });
+      return interaction.reply({ content: 'This button is not for you.', flags: MessageFlags.Ephemeral });
     }
 
     let targetUser;
@@ -45,7 +45,7 @@ async function handleButton(interaction) {
     const warnings = getWarnings(interaction.guild.id, targetUserId);
     const embed = buildWarningsEmbed(warnings, targetUser, interaction.guild, modViewing);
 
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 
   if (action === 'ban_user') {
@@ -53,17 +53,17 @@ async function handleButton(interaction) {
     const pending = getPendingAction(actionId);
 
     if (!pending) {
-      return interaction.reply({ content: 'This action has expired. Please run the command again.', ephemeral: true });
+      return interaction.reply({ content: 'This action has expired. Please run the command again.', flags: MessageFlags.Ephemeral });
     }
 
     if (interaction.user.id !== pending.moderatorId) {
-      return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
+      return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
     // Re-verify ban permission in case it was revoked since the button was created
     const settings = getSettings(interaction.guild.id);
     if (!canBan(interaction.member, settings)) {
-      return interaction.reply({ content: 'You no longer have permission to ban.', ephemeral: true });
+      return interaction.reply({ content: 'You no longer have permission to ban.', flags: MessageFlags.Ephemeral });
     }
 
     try {
@@ -107,7 +107,7 @@ async function handleButton(interaction) {
       }
     } catch (err) {
       logger.error(`Failed to ban user ${pending.targetId}:`, err);
-      await interaction.reply({ content: `Failed to ban user: ${err.message}`, ephemeral: true });
+      await interaction.reply({ content: `Failed to ban user: ${err.message}`, flags: MessageFlags.Ephemeral });
     }
     return;
   }
@@ -117,11 +117,11 @@ async function handleButton(interaction) {
     const pending = getPendingAction(actionId);
 
     if (!pending) {
-      return interaction.reply({ content: 'This action has expired. Please run the command again.', ephemeral: true });
+      return interaction.reply({ content: 'This action has expired. Please run the command again.', flags: MessageFlags.Ephemeral });
     }
 
     if (interaction.user.id !== pending.moderatorId) {
-      return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
+      return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
     addWarning(interaction.guild.id, pending.targetId, pending.moderatorId, pending.reason, 'manual', pending.messageContent || null);
@@ -241,11 +241,11 @@ async function handleButton(interaction) {
     const pending = getPendingAction(actionId);
 
     if (!pending) {
-      return interaction.reply({ content: 'This action has expired. Please run the command again.', ephemeral: true });
+      return interaction.reply({ content: 'This action has expired. Please run the command again.', flags: MessageFlags.Ephemeral });
     }
 
     if (interaction.user.id !== pending.moderatorId) {
-      return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
+      return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
     try {
@@ -305,7 +305,7 @@ async function handleButton(interaction) {
       }
     } catch (err) {
       logger.error(`Failed to ban user ${pending.targetId}:`, err);
-      await interaction.reply({ content: `Failed to ban user: ${err.message}`, ephemeral: true });
+      await interaction.reply({ content: `Failed to ban user: ${err.message}`, flags: MessageFlags.Ephemeral });
     }
     return;
   }
@@ -315,7 +315,7 @@ async function handleButton(interaction) {
     const pending = getPendingAction(actionId);
 
     if (pending && interaction.user.id !== pending.moderatorId) {
-      return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
+      return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
     deletePendingAction(actionId);
@@ -332,7 +332,7 @@ async function handleButton(interaction) {
     const pending = getPendingAction(actionId);
 
     if (pending && interaction.user.id !== pending.moderatorId) {
-      return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
+      return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
     deletePendingAction(actionId);
@@ -349,13 +349,13 @@ async function handleButton(interaction) {
     const thread = getOpenThreadByChannel(channelId);
 
     if (!thread) {
-      return interaction.reply({ content: 'This modmail thread is already closed or does not exist.', ephemeral: true });
+      return interaction.reply({ content: 'This modmail thread is already closed or does not exist.', flags: MessageFlags.Ephemeral });
     }
 
     // Check if user is a moderator
     const settings = getSettings(interaction.guild.id);
     if (!isModerator(interaction.member, settings)) {
-      return interaction.reply({ content: 'Only moderators can close modmail threads.', ephemeral: true });
+      return interaction.reply({ content: 'Only moderators can close modmail threads.', flags: MessageFlags.Ephemeral });
     }
 
     try {
@@ -411,7 +411,7 @@ async function handleButton(interaction) {
       logger.info(`Modmail thread closed: channel=${channelId} closedBy=${interaction.user.tag}`);
     } catch (err) {
       logger.error(`Failed to close modmail thread: ${err.message}`);
-      await interaction.reply({ content: `Failed to close thread: ${err.message}`, ephemeral: true });
+      await interaction.reply({ content: `Failed to close thread: ${err.message}`, flags: MessageFlags.Ephemeral });
     }
     return;
   }
@@ -420,16 +420,16 @@ async function handleButton(interaction) {
     const settings = getSettings(interaction.guild.id);
 
     if (!settings.ticket_category_id) {
-      return interaction.reply({ content: 'Ticket system is not configured yet. An admin needs to set a ticket category in the dashboard.', ephemeral: true });
+      return interaction.reply({ content: 'Ticket system is not configured yet. An admin needs to set a ticket category in the dashboard.', flags: MessageFlags.Ephemeral });
     }
 
     // Check for existing open ticket
     const existing = getOpenTicketByUser(interaction.guild.id, interaction.user.id);
     if (existing) {
-      return interaction.reply({ content: `You already have an open ticket: <#${existing.channel_id}>`, ephemeral: true });
+      return interaction.reply({ content: `You already have an open ticket: <#${existing.channel_id}>`, flags: MessageFlags.Ephemeral });
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
       const { ChannelType, PermissionFlagsBits: Perms } = require('discord.js');
@@ -491,14 +491,14 @@ async function handleButton(interaction) {
     // Permission check: admin, ticket admin role, or the ticket owner
     const ticket = getOpenTicketByChannel(channelId);
     if (!ticket) {
-      return interaction.reply({ content: 'This ticket is already closed or does not exist.', ephemeral: true });
+      return interaction.reply({ content: 'This ticket is already closed or does not exist.', flags: MessageFlags.Ephemeral });
     }
 
     const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
     const isTicketAdmin = settings.ticket_admin_role_id && interaction.member.roles.cache.has(settings.ticket_admin_role_id);
 
     if (!isAdmin && !isTicketAdmin) {
-      return interaction.reply({ content: 'Only admins can close tickets.', ephemeral: true });
+      return interaction.reply({ content: 'Only admins can close tickets.', flags: MessageFlags.Ephemeral });
     }
 
     // Log transcript before closing
@@ -598,7 +598,7 @@ async function handleButton(interaction) {
     const settings = getSettings(interaction.guild.id);
 
     if (!canViewModActions(interaction.member, settings)) {
-      return interaction.reply({ content: 'You do not have permission to view mod actions.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to view mod actions.', flags: MessageFlags.Ephemeral });
     }
 
     const { getModActions } = require('../../database/modactions');
@@ -698,7 +698,7 @@ async function handleCommand(interaction) {
     await command.execute(interaction);
   } catch (err) {
     logger.error(`Error executing command ${interaction.commandName}:`, err);
-    const reply = { content: 'An error occurred while executing this command.', ephemeral: true };
+    const reply = { content: 'An error occurred while executing this command.', flags: MessageFlags.Ephemeral };
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp(reply);
     } else {
@@ -712,10 +712,10 @@ async function handleHwidResetModal(interaction) {
   const reason = interaction.fields.getTextInputValue('reason');
 
   if (!config.licensing.apiUrl || !config.licensing.apiKey) {
-    return interaction.reply({ content: 'HWID reset is not configured. Please contact an admin.', ephemeral: true });
+    return interaction.reply({ content: 'HWID reset is not configured. Please contact an admin.', flags: MessageFlags.Ephemeral });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     // Look up the user's license
@@ -801,29 +801,29 @@ async function handleModalSubmit(interaction) {
   const settings = getSettings(interaction.guild.id);
 
   if (timeoutInput && !timeoutMs) {
-    return interaction.reply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.', ephemeral: true });
+    return interaction.reply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.', flags: MessageFlags.Ephemeral });
   }
 
   if (!canWarn(interaction.member, settings)) {
-    return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
   }
 
   let targetUser;
   try {
     targetUser = await interaction.client.users.fetch(targetUserId);
   } catch {
-    return interaction.reply({ content: 'Could not find that user.', ephemeral: true });
+    return interaction.reply({ content: 'Could not find that user.', flags: MessageFlags.Ephemeral });
   }
 
   let targetMember;
   try {
     targetMember = await interaction.guild.members.fetch(targetUserId);
   } catch {
-    return interaction.reply({ content: 'Could not find that user in this server.', ephemeral: true });
+    return interaction.reply({ content: 'Could not find that user in this server.', flags: MessageFlags.Ephemeral });
   }
 
   if (isExempt(targetMember, settings)) {
-    return interaction.reply({ content: 'You cannot warn a moderator or someone with a higher role.', ephemeral: true });
+    return interaction.reply({ content: 'You cannot warn a moderator or someone with a higher role.', flags: MessageFlags.Ephemeral });
   }
 
   const existingWarnings = getWarnings(interaction.guild.id, targetUserId);
@@ -888,7 +888,7 @@ async function handleModalSubmit(interaction) {
       content: `**New warning reason:** ${reason}`,
       embeds: [embed],
       components: [row],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -930,7 +930,7 @@ async function handleModalSubmit(interaction) {
 
   await interaction.reply({
     content: replyContent,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 
   // Send public notification

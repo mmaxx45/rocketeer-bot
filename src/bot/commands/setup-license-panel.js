@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const logger = require('../../logger');
 
 module.exports = {
@@ -36,7 +36,7 @@ module.exports = {
     );
 
     await interaction.channel.send({ embeds: [embed], components: [row] });
-    await interaction.reply({ content: 'License panel posted.', ephemeral: true });
+    await interaction.reply({ content: 'License panel posted.', flags: MessageFlags.Ephemeral });
     logger.info(`License panel set up in #${interaction.channel.name} by ${interaction.user.tag}`);
   },
 };

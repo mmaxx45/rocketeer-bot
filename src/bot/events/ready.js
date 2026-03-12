@@ -26,7 +26,7 @@ async function registerCommands(client) {
 }
 
 module.exports = {
-  name: 'ready',
+  name: 'clientReady',
   once: true,
   async execute(client) {
     logger.info(`Bot ready as ${client.user.tag}, serving ${client.guilds.cache.size} guild(s)`);

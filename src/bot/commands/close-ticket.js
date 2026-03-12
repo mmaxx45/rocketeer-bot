@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const logger = require('../../logger');
 const { getSettings } = require('../../database/settings');
 const { getOpenTicketByChannel, closeTicket } = require('../../database/tickets');
@@ -17,12 +17,12 @@ module.exports = {
       (settings.ticket_admin_role_id && interaction.member.roles.cache.has(settings.ticket_admin_role_id));
 
     if (!hasPermission) {
-      return interaction.reply({ content: 'You do not have permission to close tickets.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to close tickets.', flags: MessageFlags.Ephemeral });
     }
 
     const ticket = getOpenTicketByChannel(interaction.channel.id);
     if (!ticket) {
-      return interaction.reply({ content: 'This channel is not an open ticket.', ephemeral: true });
+      return interaction.reply({ content: 'This channel is not an open ticket.', flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferReply();

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
@@ -21,7 +21,7 @@ module.exports = {
     const settings = getSettings(interaction.guild.id);
 
     if (!isModerator(interaction.member, settings)) {
-      return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     const targetUser = interaction.options.getUser('user');
@@ -31,7 +31,7 @@ module.exports = {
     const warnings = getWarnings(guildId, targetUser.id);
 
     if (warnings.length === 0) {
-      return interaction.reply({ content: `<@${targetUser.id}> has no warnings to remove.`, ephemeral: true });
+      return interaction.reply({ content: `<@${targetUser.id}> has no warnings to remove.`, flags: MessageFlags.Ephemeral });
     }
 
     // --- Clear all ---
@@ -46,7 +46,7 @@ module.exports = {
 
       await interaction.reply({
         content: `Cleared all **${warnings.length}** warning(s) from <@${targetUser.id}>.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
 
       if (settings.warn_log_channel_id) {
@@ -76,14 +76,14 @@ module.exports = {
     if (isNaN(number) || number < 1) {
       return interaction.reply({
         content: 'Please provide a valid warning number (e.g. `1`) or `all`.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
     if (number > warnings.length) {
       return interaction.reply({
         content: `<@${targetUser.id}> only has **${warnings.length}** warning(s). Please provide a number between 1 and ${warnings.length}, or \`all\`.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -98,7 +98,7 @@ module.exports = {
 
     await interaction.reply({
       content: `Removed warning #${number} from <@${targetUser.id}>.\n**Reason was:** ${warning.reason}`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
 
     if (settings.warn_log_channel_id) {

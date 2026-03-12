@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getWarnings } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { canBan, isExempt } = require('../utils/permissions');
@@ -29,7 +29,7 @@ module.exports = {
     const settings = getSettings(interaction.guild.id);
 
     if (!canBan(interaction.member, settings)) {
-      return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     const targetUser = interaction.options.getUser('user');
@@ -37,22 +37,22 @@ module.exports = {
     const deleteMessageDays = interaction.options.getInteger('delete_messages_days') || 0;
 
     if (targetUser.bot) {
-      return interaction.reply({ content: 'You cannot ban a bot with this command.', ephemeral: true });
+      return interaction.reply({ content: 'You cannot ban a bot with this command.', flags: MessageFlags.Ephemeral });
     }
 
     if (targetUser.id === interaction.user.id) {
-      return interaction.reply({ content: 'You cannot ban yourself.', ephemeral: true });
+      return interaction.reply({ content: 'You cannot ban yourself.', flags: MessageFlags.Ephemeral });
     }
 
     let targetMember;
     try {
       targetMember = await interaction.guild.members.fetch(targetUser.id);
     } catch {
-      return interaction.reply({ content: 'Could not find that user in this server.', ephemeral: true });
+      return interaction.reply({ content: 'Could not find that user in this server.', flags: MessageFlags.Ephemeral });
     }
 
     if (isExempt(targetMember, settings)) {
-      return interaction.reply({ content: 'You cannot ban a moderator or admin.', ephemeral: true });
+      return interaction.reply({ content: 'You cannot ban a moderator or admin.', flags: MessageFlags.Ephemeral });
     }
 
     // Build confirmation embed with current warnings
@@ -95,7 +95,7 @@ module.exports = {
     return interaction.reply({
       embeds: [embed],
       components: [row],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   },
 };

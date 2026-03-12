@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { getWarnings } = require('../../database/warnings');
 const { buildWarningsEmbed } = require('../utils/embeds');
 
@@ -12,6 +12,6 @@ module.exports = {
     const embed = buildWarningsEmbed(warnings, interaction.user, interaction.guild, false);
     embed.setTitle('Your Warnings');
 
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   },
 };

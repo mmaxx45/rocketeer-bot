@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { getWarnings } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { isModerator } = require('../utils/permissions');
@@ -17,13 +17,13 @@ module.exports = {
     const settings = getSettings(interaction.guild.id);
 
     if (!isModerator(interaction.member, settings)) {
-      return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     const targetUser = interaction.options.getUser('user');
     const warnings = getWarnings(interaction.guild.id, targetUser.id);
     const embed = buildWarningsEmbed(warnings, targetUser, interaction.guild);
 
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   },
 };

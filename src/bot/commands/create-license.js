@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const logger = require('../../logger');
 const config = require('../../config');
 const { getSettings } = require('../../database/settings');
@@ -25,12 +25,12 @@ module.exports = {
       (settings.ticket_admin_role_id && interaction.member.roles.cache.has(settings.ticket_admin_role_id));
 
     if (!hasPermission) {
-      return interaction.reply({ content: 'You do not have permission to create licenses.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to create licenses.', flags: MessageFlags.Ephemeral });
     }
 
     // Check licensing API is configured
     if (!config.licensing.apiUrl || !config.licensing.apiKey) {
-      return interaction.reply({ content: 'Licensing API is not configured. Set `LICENSING_API_URL` and `LICENSING_API_KEY` in the bot\'s `.env` file.', ephemeral: true });
+      return interaction.reply({ content: 'Licensing API is not configured. Set `LICENSING_API_URL` and `LICENSING_API_KEY` in the bot\'s `.env` file.', flags: MessageFlags.Ephemeral });
     }
 
     const targetUser = interaction.options.getUser('user');

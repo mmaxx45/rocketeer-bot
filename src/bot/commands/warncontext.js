@@ -1,4 +1,4 @@
-const { ApplicationCommandType, ContextMenuCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+const { ApplicationCommandType, ContextMenuCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, MessageFlags } = require('discord.js');
 
 module.exports = {
   data: new ContextMenuCommandBuilder()
@@ -11,7 +11,7 @@ module.exports = {
     const targetUser = targetMessage.author;
 
     if (targetUser.bot) {
-      return interaction.reply({ content: 'You cannot warn a bot.', ephemeral: true });
+      return interaction.reply({ content: 'You cannot warn a bot.', flags: MessageFlags.Ephemeral });
     }
 
     // Store the target message ID in the modal custom ID so we can retrieve it on submit

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ChannelType, MessageFlags } = require('discord.js');
 const { getSettings, updateSetting } = require('../../database/settings');
 const { getOpenThreadByChannel, closeThread, getAllOpenThreads } = require('../../database/modmail');
 const { isModerator } = require('../utils/permissions');
@@ -37,7 +37,7 @@ module.exports = {
     const settings = getSettings(interaction.guild.id);
 
     if (!isModerator(interaction.member, settings)) {
-      return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     const subcommand = interaction.options.getSubcommand();
@@ -58,14 +58,14 @@ module.exports = {
         )
         .setTimestamp();
 
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
     if (subcommand === 'close') {
       const thread = getOpenThreadByChannel(interaction.channel.id);
 
       if (!thread) {
-        return interaction.reply({ content: 'This channel is not an active modmail thread.', ephemeral: true });
+        return interaction.reply({ content: 'This channel is not an active modmail thread.', flags: MessageFlags.Ephemeral });
       }
 
       try {
@@ -111,7 +111,7 @@ module.exports = {
         logger.info(`Modmail thread closed via command: channel=${interaction.channel.id} closedBy=${interaction.user.tag}`);
       } catch (err) {
         logger.error(`Failed to close modmail thread: ${err.message}`);
-        return interaction.reply({ content: `Failed to close thread: ${err.message}`, ephemeral: true });
+        return interaction.reply({ content: `Failed to close thread: ${err.message}`, flags: MessageFlags.Ephemeral });
       }
       return;
     }
@@ -120,7 +120,7 @@ module.exports = {
       const threads = getAllOpenThreads(interaction.guild.id);
 
       if (threads.length === 0) {
-        return interaction.reply({ content: 'No open modmail threads.', ephemeral: true });
+        return interaction.reply({ content: 'No open modmail threads.', flags: MessageFlags.Ephemeral });
       }
 
       const lines = [];
@@ -136,7 +136,7 @@ module.exports = {
         .setDescription(lines.join('\n'))
         .setTimestamp();
 
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
   },
 };

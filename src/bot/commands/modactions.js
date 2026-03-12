@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const { getSettings } = require('../../database/settings');
 const { getModActions } = require('../../database/modactions');
 const { canViewModActions } = require('../utils/permissions');
@@ -67,7 +67,7 @@ module.exports = {
     const settings = getSettings(interaction.guild.id);
 
     if (!canViewModActions(interaction.member, settings)) {
-      return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     const targetUser = interaction.options.getUser('user');
@@ -104,7 +104,7 @@ module.exports = {
     return interaction.reply({
       embeds: [embed],
       components,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   },
 };
