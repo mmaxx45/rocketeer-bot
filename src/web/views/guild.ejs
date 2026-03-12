@@ -220,7 +220,7 @@
                 <span class="setting-hint">How quickly a similar message in another channel triggers detection.</span>
                 <div class="input-group">
                   <input type="number" name="crosspost_detection_seconds" class="form-control"
-                         min="5" max="3600" value="<%= settings.crosspost_detection_seconds %>">
+                         min="5" max="300" value="<%= settings.crosspost_detection_seconds %>">
                   <span class="input-group-text">seconds</span>
                 </div>
               </div>
@@ -398,7 +398,7 @@
                 <label class="setting-label"><i class="bi bi-file-earmark-x"></i> Blocked Extensions</label>
                 <span class="setting-hint">Comma-separated list of blocked file extensions (without dots). Leave blank to use defaults.</span>
                 <textarea name="blocked_extensions" class="form-control" rows="3"
-                          placeholder="exe, bat, cmd, msi, scr, pif, com, vbs, vbe, js, jse, wsf, wsh, ps1, psm1, psd1, reg, inf, hta, cpl, msp, mst, sct, ws, dll, sys, drv, ocx, jar, apk, deb, rpm, dmg, iso, img, lnk, url, desktop"><%= settings.blocked_extensions ? JSON.parse(settings.blocked_extensions).join(', ') : '' %></textarea>
+                          placeholder="exe, bat, cmd, msi, scr, pif, com, vbs, vbe, js, jse, wsf, wsh, ps1, psm1, psd1, reg, inf, hta, cpl, msp, mst, sct, ws, dll, sys, drv, ocx, jar, apk, deb, rpm, dmg, iso, img, lnk, url, desktop"><%= settings.blocked_extensions ? (() => { try { return JSON.parse(settings.blocked_extensions).join(', '); } catch { return ''; } })() : '' %></textarea>
                 <a href="#" class="small mt-1 d-inline-block reset-default" data-target="blocked_extensions">Reset to default</a>
               </div>
             </div>
@@ -417,7 +417,7 @@
             <label class="setting-label">Custom Warning Reasons</label>
             <span class="setting-hint">Customize the autocomplete suggestions shown when moderators use /warn. One reason per line. Leave blank to use defaults.</span>
             <textarea name="custom_warn_reasons" class="form-control" rows="6"
-                      placeholder="Spam or flooding&#10;Inappropriate language&#10;Harassment or bullying&#10;NSFW content&#10;Advertising or self-promotion&#10;Crossposting&#10;Off-topic&#10;Impersonation&#10;Sharing personal information&#10;Trolling or disruptive behavior"><%= settings.custom_warn_reasons ? JSON.parse(settings.custom_warn_reasons).join('\n') : '' %></textarea>
+                      placeholder="Spam or flooding&#10;Inappropriate language&#10;Harassment or bullying&#10;NSFW content&#10;Advertising or self-promotion&#10;Crossposting&#10;Off-topic&#10;Impersonation&#10;Sharing personal information&#10;Trolling or disruptive behavior"><%= settings.custom_warn_reasons ? (() => { try { return JSON.parse(settings.custom_warn_reasons).join('\n'); } catch { return ''; } })() : '' %></textarea>
             <a href="#" class="small mt-1 d-inline-block reset-default" data-target="custom_warn_reasons">Reset to defaults</a>
           </div>
         </div>

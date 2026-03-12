@@ -70,13 +70,17 @@ async function addExemptChannel(guildId) {
     if (result.success) {
       // Add badge to the list
       const list = document.getElementById('exempt-channels-list');
-      list.insertAdjacentHTML('beforeend', `
-        <span class="badge bg-secondary d-flex align-items-center gap-1 exempt-badge" data-channel-id="${channelId}">
-          ${channelName}
-          <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.6rem;"
-                  onclick="removeExemptChannel('${guildId}', '${channelId}', this)"></button>
-        </span>
-      `);
+      const badge = document.createElement('span');
+      badge.className = 'badge bg-secondary d-flex align-items-center gap-1 exempt-badge';
+      badge.dataset.channelId = channelId;
+      badge.textContent = channelName;
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'btn-close btn-close-white ms-1';
+      closeBtn.style.cssText = 'font-size: 0.6rem;';
+      closeBtn.addEventListener('click', () => removeExemptChannel(guildId, channelId, closeBtn));
+      badge.appendChild(closeBtn);
+      list.appendChild(badge);
 
       // Remove from dropdown
       select.querySelector(`option[value="${channelId}"]`).remove();

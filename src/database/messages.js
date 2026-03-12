@@ -12,6 +12,7 @@
 
 const DEFAULT_MAX_AGE_SECONDS = 300; // 5 minutes — plenty for 30-second detection window
 const DEFAULT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // run cleanup every 5 minutes
+const MAX_CACHE_ENTRIES = 50000; // hard cap to prevent unbounded memory growth
 
 /** @type {Map<string, Array<{guildId: string, channelId: string, messageId: string, content: string, createdAt: number}>>} */
 const cacheByUser = new Map();
@@ -48,6 +49,11 @@ function cacheMessage(guildId, channelId, userId, messageId, content, attachment
 
   // Message-ID index
   cacheById.set(messageId, entry);
+
+  // Enforce hard cap — evict oldest entries if cache grows too large
+  if (cacheById.size > MAX_CACHE_ENTRIES) {
+    purgeExpired();
+  }
 }
 
 /**

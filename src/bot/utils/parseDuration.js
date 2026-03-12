@@ -36,7 +36,7 @@ function parseDuration(input) {
 
   // Bare number → treat as minutes
   if (/^\d+$/.test(str)) {
-    const ms = parseInt(str) * 60 * 1000;
+    const ms = parseInt(str, 10) * 60 * 1000;
     if (ms <= 0 || ms > MAX_TIMEOUT_MS) return null;
     return ms;
   }

@@ -15,6 +15,9 @@ let addIncidentStmt;
 let countRecentIncidentsStmt;
 let countRecentIncidentsMinutesStmt;
 
+// Per-user lock to prevent race conditions when two identical messages arrive simultaneously
+const processingLocks = new Set();
+
 function getIncidentStmts() {
   if (!addIncidentStmt) {
     addIncidentStmt = db.prepare(
@@ -31,18 +34,26 @@ function getIncidentStmts() {
 }
 
 const MAX_ATTACHMENT_HASH_SIZE = 25 * 1024 * 1024; // 25 MB (Discord default upload limit)
+const MAX_ATTACHMENTS_TO_HASH = 5;
+const ATTACHMENT_FETCH_TIMEOUT_MS = 10000; // 10 seconds
 
 async function hashAttachments(attachments) {
   const hashes = [];
+  let count = 0;
   for (const [, attachment] of attachments) {
+    if (count >= MAX_ATTACHMENTS_TO_HASH) break;
     if (attachment.size > MAX_ATTACHMENT_HASH_SIZE || attachment.size === 0) continue;
     try {
-      const res = await fetch(attachment.url);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), ATTACHMENT_FETCH_TIMEOUT_MS);
+      const res = await fetch(attachment.url, { signal: controller.signal });
+      clearTimeout(timeout);
       if (!res.ok) continue;
       const buffer = Buffer.from(await res.arrayBuffer());
       hashes.push(crypto.createHash('sha256').update(buffer).digest('hex'));
+      count++;
     } catch {
-      // Skip unhashable attachments
+      // Skip unhashable/timed-out attachments
     }
   }
   return hashes;
@@ -147,7 +158,7 @@ async function handleDM(message) {
     }
 
     const displayName = message.author.tag || message.author.username;
-    const channelName = `modmail-${message.author.username.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+    const channelName = `modmail-${message.author.username.toLowerCase().replace(/[^a-z0-9]/g, '-')}`.slice(0, 100);
 
     const modmailChannel = await targetGuild.channels.create({
       name: channelName,
@@ -421,6 +432,16 @@ module.exports = {
     // Nothing to detect crosspost on
     if (!hasDetectableText && !hasDetectableAttachments) return;
 
+    // Acquire per-user lock to prevent race conditions with simultaneous messages
+    const lockKey = `${guildId}:${message.author.id}`;
+    if (processingLocks.has(lockKey)) {
+      // Another message from this user is being processed — just cache and skip
+      cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content, attachmentHashes);
+      return;
+    }
+    processingLocks.add(lockKey);
+    try {
+
     if (isExemptChannel) {
       cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content, attachmentHashes);
       return;
@@ -662,6 +683,10 @@ module.exports = {
       logEmbed.setTimestamp();
 
       await sendToWarnLogChannel(message.guild, settings, logEmbed);
+    }
+
+    } finally {
+      processingLocks.delete(lockKey);
     }
   },
 };

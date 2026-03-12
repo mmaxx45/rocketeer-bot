@@ -18,6 +18,8 @@
     "fastest-levenshtein": "^1.0.16",
     "passport": "^0.7.0",
     "passport-discord-auth": "^1.2.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
     "winston": "^3.17.0"
   },
   "devDependencies": {

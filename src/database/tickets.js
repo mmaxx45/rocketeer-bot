@@ -15,10 +15,17 @@ function getStmts() {
   return stmts;
 }
 
-function createTicket(guildId, userId, channelId) {
+const createTicketTx = db.transaction((guildId, userId, channelId) => {
   const s = getStmts();
+  // Check again inside transaction to prevent race condition
+  const existing = s.getOpenByUser.get(guildId, userId);
+  if (existing) return null;
   s.create.run(guildId, userId, channelId);
   return s.getOpenByChannel.get(channelId);
+});
+
+function createTicket(guildId, userId, channelId) {
+  return createTicketTx(guildId, userId, channelId);
 }
 
 function getOpenTicketByUser(guildId, userId) {

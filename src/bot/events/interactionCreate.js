@@ -60,6 +60,12 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
     }
 
+    // Re-verify ban permission in case it was revoked since the button was created
+    const settings = getSettings(interaction.guild.id);
+    if (!canBan(interaction.member, settings)) {
+      return interaction.reply({ content: 'You no longer have permission to ban.', ephemeral: true });
+    }
+
     try {
       const member = await interaction.guild.members.fetch(pending.targetId);
       await member.ban({ reason: `Banned by ${interaction.user.tag}: ${pending.reason}` });
@@ -78,7 +84,6 @@ async function handleButton(interaction) {
         components: [],
       });
 
-      const settings = getSettings(interaction.guild.id);
       if (settings.ban_log_channel_id) {
         try {
           const logChannel = await interaction.guild.channels.fetch(settings.ban_log_channel_id);
@@ -501,8 +506,19 @@ async function handleButton(interaction) {
       try {
         const logChannel = await interaction.guild.channels.fetch(settings.ticket_log_channel_id);
         if (logChannel) {
-          const messages = await interaction.channel.messages.fetch({ limit: 100 });
-          const transcript = messages
+          // Fetch up to 500 messages in batches of 100
+          let allMessages = [];
+          let lastId;
+          for (let i = 0; i < 5; i++) {
+            const opts = { limit: 100 };
+            if (lastId) opts.before = lastId;
+            const batch = await interaction.channel.messages.fetch(opts);
+            if (batch.size === 0) break;
+            allMessages.push(...batch.values());
+            lastId = batch.last().id;
+            if (batch.size < 100) break;
+          }
+          const transcript = allMessages
             .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
             .map(m => `[${m.createdAt.toISOString()}] ${m.author.tag}: ${m.content || '(embed/attachment)'}`)
             .join('\n');
@@ -577,7 +593,8 @@ async function handleButton(interaction) {
 
   if (action === 'modactions_page') {
     const targetUserId = params[0];
-    const page = parseInt(params[1], 10);
+    let page = parseInt(params[1], 10);
+    if (isNaN(page) || page < 1) page = 1;
     const settings = getSettings(interaction.guild.id);
 
     if (!canViewModActions(interaction.member, settings)) {
@@ -590,6 +607,7 @@ async function handleButton(interaction) {
 
     const { rows, total } = getModActions(interaction.guild.id, targetUserId, PAGE_SIZE, offset);
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (page > totalPages) page = totalPages;
 
     let targetUser;
     try {

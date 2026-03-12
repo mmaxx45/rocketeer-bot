@@ -1,6 +1,8 @@
 const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const ejs = require('ejs');
 const path = require('path');
 const fs = require('fs');
@@ -25,9 +27,23 @@ function createWebServer(client) {
   const headerFn = ejs.compile(headerTpl);
   const footerFn = ejs.compile(footerTpl);
 
+  // Security headers
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        fontSrc: ["'self'", "https://cdn.jsdelivr.net"],
+        imgSrc: ["'self'", "https://cdn.discordapp.com", "data:"],
+        connectSrc: ["'self'"],
+      },
+    },
+  }));
+
   app.use(express.static(path.join(__dirname, '..', '..', 'public')));
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '100kb' }));
+  app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 // Session config
   app.use(session({
@@ -63,9 +79,29 @@ function createWebServer(client) {
     next();
   });
 
+  // Rate limiting
+  const apiLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+  });
+
+  // CSRF protection for API routes — require JSON content type
+  // Browsers cannot send cross-origin JSON POST without CORS preflight
+  function csrfGuard(req, res, next) {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+    const ct = req.headers['content-type'] || '';
+    if (!ct.includes('application/json')) {
+      return res.status(415).json({ error: 'Content-Type must be application/json' });
+    }
+    next();
+  }
+
   app.use('/auth', require('./routes/auth').router);
   app.use('/dashboard', require('./routes/dashboard')(client));
-  app.use('/api', require('./routes/api')(client));
+  app.use('/api', apiLimiter, csrfGuard, require('./routes/api')(client));
 
   app.get('/', (req, res) => {
     if (req.isAuthenticated()) {
