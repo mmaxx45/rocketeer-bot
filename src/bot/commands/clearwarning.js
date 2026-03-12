@@ -87,7 +87,7 @@ module.exports = {
       });
     }
 
-    const warning = warnings[number - 1]; // warnings are DESC by created_at, matching /warnings display
+    const warning = warnings[number - 1]; // warnings are ASC by created_at, so #1 = oldest
     deleteWarning(warning.id, guildId);
 
     try {

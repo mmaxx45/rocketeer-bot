@@ -48,7 +48,7 @@ module.exports = function (client) {
       }
       if (crosspost_detection_seconds !== undefined) {
         const val = parseInt(crosspost_detection_seconds);
-        if (val >= 5 && val <= 3600) {
+        if (val >= 5 && val <= 300) {
           updateSetting(guildId, 'crosspost_detection_seconds', val);
         }
       }

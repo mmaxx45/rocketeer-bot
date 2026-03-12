@@ -7,7 +7,7 @@
  * Primary index:  cacheByUser   – Map<"guildId:userId", Array<Entry>>
  * Secondary index: cacheById    – Map<messageId, Entry>   (for deleteMessage)
  *
- * Entry shape: { guildId, channelId, messageId, content, createdAt }
+ * Entry shape: { guildId, channelId, messageId, content, attachmentHashes, createdAt }
  */
 
 const DEFAULT_MAX_AGE_SECONDS = 300; // 5 minutes — plenty for 30-second detection window
@@ -26,13 +26,14 @@ let maxAgeSeconds = DEFAULT_MAX_AGE_SECONDS;
 // Public API — same function signatures as the old SQLite-backed module
 // ---------------------------------------------------------------------------
 
-function cacheMessage(guildId, channelId, userId, messageId, content) {
+function cacheMessage(guildId, channelId, userId, messageId, content, attachmentHashes) {
   const userKey = `${guildId}:${userId}`;
   const entry = {
     guildId,
     channelId,
     messageId,
     content,
+    attachmentHashes: attachmentHashes || [],
     createdAt: Date.now(),
     userKey, // kept so deleteMessage can locate the array quickly
   };
@@ -72,6 +73,7 @@ function getRecentMessages(guildId, userId, excludeChannelId, windowSeconds = 30
         channel_id: entry.channelId,
         message_id: entry.messageId,
         content: entry.content,
+        attachment_hashes: entry.attachmentHashes,
       });
     }
   }

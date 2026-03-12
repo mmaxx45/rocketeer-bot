@@ -62,7 +62,7 @@ async function handleButton(interaction) {
 
     try {
       const member = await interaction.guild.members.fetch(pending.targetId);
-      await member.ban({ reason: `Banned by ${interaction.user.tag}: accumulated warnings` });
+      await member.ban({ reason: `Banned by ${interaction.user.tag}: ${pending.reason}` });
 
       deletePendingAction(actionId);
 
@@ -324,6 +324,12 @@ async function handleButton(interaction) {
 
   if (action === 'cancel_action') {
     const actionId = params[0];
+    const pending = getPendingAction(actionId);
+
+    if (pending && interaction.user.id !== pending.moderatorId) {
+      return interaction.reply({ content: 'This action is not for you.', ephemeral: true });
+    }
+
     deletePendingAction(actionId);
     await interaction.update({
       content: 'Action cancelled.',
@@ -377,7 +383,7 @@ async function handleButton(interaction) {
       try {
         const channel = await interaction.guild.channels.fetch(channelId);
         if (channel) {
-          await channel.setName(`closed-${channel.name}`);
+          await channel.setName(channel.name.startsWith('closed-') ? channel.name : `closed-${channel.name}`);
           // Send a final message
           await channel.send({
             embeds: [

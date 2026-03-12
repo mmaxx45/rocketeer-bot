@@ -100,7 +100,7 @@ module.exports = {
 
         // Lock the channel
         try {
-          await interaction.channel.setName(`closed-${interaction.channel.name}`);
+          await interaction.channel.setName(interaction.channel.name.startsWith('closed-') ? interaction.channel.name : `closed-${interaction.channel.name}`);
           await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone.id, {
             SendMessages: false,
           });

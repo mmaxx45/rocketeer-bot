@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const logger = require('../../logger');
 const { getSettings, getExemptChannels } = require('../../database/settings');
 const { cacheMessage, getRecentMessages, deleteMessage } = require('../../database/messages');
@@ -29,6 +30,24 @@ function getIncidentStmts() {
   return { addIncidentStmt, countRecentIncidentsStmt, countRecentIncidentsMinutesStmt };
 }
 
+const MAX_ATTACHMENT_HASH_SIZE = 25 * 1024 * 1024; // 25 MB (Discord default upload limit)
+
+async function hashAttachments(attachments) {
+  const hashes = [];
+  for (const [, attachment] of attachments) {
+    if (attachment.size > MAX_ATTACHMENT_HASH_SIZE || attachment.size === 0) continue;
+    try {
+      const res = await fetch(attachment.url);
+      if (!res.ok) continue;
+      const buffer = Buffer.from(await res.arrayBuffer());
+      hashes.push(crypto.createHash('sha256').update(buffer).digest('hex'));
+    } catch {
+      // Skip unhashable attachments
+    }
+  }
+  return hashes;
+}
+
 function truncate(text, maxLength) {
   if (!text) return '*[empty]*';
   if (text.length <= maxLength) return text;
@@ -40,6 +59,7 @@ function buildCrosspostEmbed(originalContent, originalChannelId, crosspostConten
     .setColor(color)
     .addFields(
       { name: 'Original Message', value: truncate(originalContent, 1024), inline: false },
+      { name: 'Duplicate Message', value: truncate(crosspostContent, 1024), inline: false },
       { name: 'Original Channel', value: `<#${originalChannelId}>`, inline: true },
       { name: 'Duplicate Channel', value: `<#${crosspostChannelId}>`, inline: true },
       { name: 'Similarity', value: `${similarityScore.toFixed(1)}%`, inline: true },
@@ -388,19 +408,26 @@ module.exports = {
     }
 
     // --- Crosspost detection ---
-    // Requires message content
-    if (!hasContent) return;
+    const normalized = hasContent ? normalizeMessage(message.content) : '';
+    const hasDetectableText = normalized.length >= MIN_MESSAGE_LENGTH;
 
-    const normalized = normalizeMessage(message.content);
-    if (normalized.length < MIN_MESSAGE_LENGTH) return;
+    // Hash attachments for crosspost comparison
+    let attachmentHashes = [];
+    if (hasAttachments) {
+      attachmentHashes = await hashAttachments(message.attachments);
+    }
+    const hasDetectableAttachments = attachmentHashes.length > 0;
+
+    // Nothing to detect crosspost on
+    if (!hasDetectableText && !hasDetectableAttachments) return;
 
     if (isExemptChannel) {
-      cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content);
+      cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content, attachmentHashes);
       return;
     }
 
     if (memberIsExempt) {
-      cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content);
+      cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content, attachmentHashes);
       return;
     }
 
@@ -414,15 +441,27 @@ module.exports = {
     let bestScore = 0;
 
     for (const cached of recentMessages) {
-      const score = getSimilarity(message.content, cached.content);
-      if (score >= threshold && score > bestScore) {
-        bestMatch = cached;
-        bestScore = score;
+      // Attachment hash match — identical file is an exact match
+      if (hasDetectableAttachments && cached.attachment_hashes && cached.attachment_hashes.length > 0) {
+        const hasCommonHash = attachmentHashes.some(h => cached.attachment_hashes.includes(h));
+        if (hasCommonHash) {
+          bestMatch = cached;
+          bestScore = 100;
+          break; // exact match, stop searching
+        }
+      }
+      // Text similarity match
+      if (hasDetectableText && cached.content) {
+        const score = getSimilarity(message.content, cached.content);
+        if (score >= threshold && score > bestScore) {
+          bestMatch = cached;
+          bestScore = score;
+        }
       }
     }
 
     // Cache the message regardless
-    cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content);
+    cacheMessage(guildId, message.channel.id, message.author.id, message.id, message.content, attachmentHashes);
 
     if (!bestMatch) return;
 
@@ -499,11 +538,25 @@ module.exports = {
       try {
         await message.channel.send({
           content: repeatMsg,
-          embeds: [detailEmbed],
           components: [row],
         });
       } catch (err) {
         logger.warn(`Failed to send warning message: ${err.message}`);
+      }
+
+      // Send the same warning to the original channel so users there know why the message vanished
+      try {
+        if (bestMatch.channel_id !== message.channel.id) {
+          const origChannel = await message.guild.channels.fetch(bestMatch.channel_id);
+          if (origChannel) {
+            await origChannel.send({
+              content: repeatMsg,
+              components: [row],
+            });
+          }
+        }
+      } catch (err) {
+        logger.warn(`Failed to send crosspost warning to original channel: ${err.message}`);
       }
 
       // Log to warn log channel
@@ -593,7 +646,6 @@ module.exports = {
       try {
         await message.channel.send({
           content: firstMsg,
-          embeds: [detailEmbed],
         });
       } catch (err) {
         logger.warn(`Failed to send notification message: ${err.message}`);

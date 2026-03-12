@@ -12,11 +12,30 @@ function setupPassport() {
     callbackUrl: config.discord.callbackUrl,
     scope: ['identify', 'guilds'],
   }, (accessToken, refreshToken, profile, done) => {
+    profile.accessToken = accessToken;
+    profile.fetchedAt = Date.now();
     return done(null, profile);
   }));
 
   passport.serializeUser((user, done) => done(null, user));
-  passport.deserializeUser((obj, done) => done(null, obj));
+  passport.deserializeUser(async (obj, done) => {
+    // Refresh guild permissions every 15 minutes so revoked access is enforced
+    const REFRESH_INTERVAL = 15 * 60 * 1000;
+    if (obj.accessToken && (!obj.fetchedAt || Date.now() - obj.fetchedAt > REFRESH_INTERVAL)) {
+      try {
+        const res = await fetch('https://discord.com/api/v10/users/@me/guilds', {
+          headers: { Authorization: `Bearer ${obj.accessToken}` },
+        });
+        if (res.ok) {
+          obj.guilds = await res.json();
+          obj.fetchedAt = Date.now();
+        }
+      } catch {
+        // Use cached data on error
+      }
+    }
+    done(null, obj);
+  });
 }
 
 router.get('/discord', passport.authenticate('discord'));

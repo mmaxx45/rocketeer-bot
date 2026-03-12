@@ -34,7 +34,7 @@ module.exports = {
     // Load status message from database (use first guild that has one set, or default)
     let statusMessage = 'DM for help!';
     try {
-      const row = db.prepare('SELECT bot_status_message FROM guild_settings WHERE bot_status_message IS NOT NULL LIMIT 1').get();
+      const row = db.prepare('SELECT bot_status_message FROM guild_settings WHERE bot_status_message IS NOT NULL ORDER BY rowid DESC LIMIT 1').get();
       if (row && row.bot_status_message) {
         statusMessage = row.bot_status_message;
       }
