@@ -34,6 +34,7 @@ function getStmts() {
         ticket_category_id: db.prepare(`UPDATE guild_settings SET ticket_category_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         ticket_admin_role_id: db.prepare(`UPDATE guild_settings SET ticket_admin_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         ticket_log_channel_id: db.prepare(`UPDATE guild_settings SET ticket_log_channel_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        loader_file_name: db.prepare(`UPDATE guild_settings SET loader_file_name = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }

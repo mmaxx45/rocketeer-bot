@@ -198,6 +198,12 @@ function runMigrations() {
     db.pragma('user_version = 10');
   }
 
+  if (version < 11) {
+    logger.info('Running database migration v11: add loader_file_name');
+    safeAddColumn('guild_settings', 'loader_file_name', 'TEXT DEFAULT NULL');
+    db.pragma('user_version = 11');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

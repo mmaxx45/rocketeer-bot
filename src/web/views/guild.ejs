@@ -533,6 +533,30 @@ Please review the channel list and post in the most appropriate channel moving f
                 </select>
               </div>
             </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-download"></i> Loader File</label>
+                <span class="setting-hint">Upload a loader file that will be sent to the customer when a license is provisioned via <code>/create-license</code>.</span>
+                <div id="loader-current" class="mb-2">
+                  <% if (settings.loader_file_name) { %>
+                    <span class="badge bg-success d-inline-flex align-items-center gap-1 py-2 px-3">
+                      <i class="bi bi-file-earmark-check"></i>
+                      <span id="loader-file-name"><%= settings.loader_file_name %></span>
+                      <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.5rem;"
+                              onclick="deleteLoader('<%= guild.id %>')"></button>
+                    </span>
+                  <% } else { %>
+                    <span class="badge bg-secondary py-2 px-3"><i class="bi bi-x-circle"></i> No loader uploaded</span>
+                  <% } %>
+                </div>
+                <div class="input-group">
+                  <input type="file" class="form-control" id="loader-file-input">
+                  <button type="button" class="btn btn-outline-primary" onclick="uploadLoader('<%= guild.id %>')">
+                    <i class="bi bi-upload"></i> Upload
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

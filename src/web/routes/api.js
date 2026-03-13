@@ -1,10 +1,35 @@
 const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { ActivityType } = require('discord.js');
 const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels } = require('../../database/settings');
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const logger = require('../../logger');
 const { userCanManageGuild } = require('../middleware/auth');
+
+// Multer config for loader uploads — store per guild
+const loaderStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', '..', '..', 'data', 'loaders', req.params.guildId);
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    // Sanitize: keep only the original filename (no path traversal)
+    const safeName = path.basename(file.originalname);
+    cb(null, safeName);
+  },
+});
+
+const loaderUpload = multer({
+  storage: loaderStorage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB (Nitro limit)
+  fileFilter: (req, file, cb) => {
+    cb(null, true);
+  },
+});
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) return next();
@@ -330,6 +355,52 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to fetch incidents:', err);
       res.status(500).json({ error: 'Failed to fetch incidents' });
+    }
+  });
+
+  // Upload loader file
+  router.post('/guild/:guildId/loader', ensureGuildAccess, loaderUpload.single('loader'), (req, res) => {
+    const { guildId } = req.params;
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    try {
+      // Remove any previous loader file
+      const settings = getSettings(guildId);
+      if (settings.loader_file_name) {
+        const oldPath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', guildId, settings.loader_file_name);
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
+        }
+      }
+
+      updateSetting(guildId, 'loader_file_name', req.file.filename);
+      logger.info(`Loader uploaded for guild ${guildId}: ${req.file.filename}`);
+      res.json({ success: true, fileName: req.file.filename });
+    } catch (err) {
+      logger.error('Failed to save loader file:', err);
+      res.status(500).json({ error: 'Failed to save loader file' });
+    }
+  });
+
+  // Delete loader file
+  router.delete('/guild/:guildId/loader', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+
+    try {
+      const settings = getSettings(guildId);
+      if (settings.loader_file_name) {
+        const filePath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', guildId, settings.loader_file_name);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        updateSetting(guildId, 'loader_file_name', null);
+      }
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to delete loader file:', err);
+      res.status(500).json({ error: 'Failed to delete loader file' });
     }
   });
 

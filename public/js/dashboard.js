@@ -126,6 +126,61 @@ async function removeExemptChannel(guildId, channelId, btn) {
   }
 }
 
+// Loader file upload
+async function uploadLoader(guildId) {
+  const input = document.getElementById('loader-file-input');
+  if (!input.files.length) {
+    showToast('Please select a file first.', 'error');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('loader', input.files[0]);
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/loader`, {
+      method: 'POST',
+      body: formData,
+    });
+    const result = await res.json();
+    if (result.success) {
+      // Update the UI to show the uploaded file
+      const container = document.getElementById('loader-current');
+      container.innerHTML = `
+        <span class="badge bg-success d-inline-flex align-items-center gap-1 py-2 px-3">
+          <i class="bi bi-file-earmark-check"></i>
+          <span id="loader-file-name">${result.fileName}</span>
+          <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.5rem;"
+                  onclick="deleteLoader('${guildId}')"></button>
+        </span>`;
+      input.value = '';
+      showToast('Loader uploaded successfully!');
+    } else {
+      showToast(result.error || 'Upload failed', 'error');
+    }
+  } catch (err) {
+    showToast('Upload failed: ' + err.message, 'error');
+  }
+}
+
+async function deleteLoader(guildId) {
+  if (!confirm('Remove the loader file?')) return;
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/loader`, { method: 'DELETE' });
+    const result = await res.json();
+    if (result.success) {
+      const container = document.getElementById('loader-current');
+      container.innerHTML = '<span class="badge bg-secondary py-2 px-3"><i class="bi bi-x-circle"></i> No loader uploaded</span>';
+      showToast('Loader removed.');
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
 // Initialize Bootstrap popovers
 document.querySelectorAll('[data-bs-toggle="popover"]').forEach(el => {
   new bootstrap.Popover(el);

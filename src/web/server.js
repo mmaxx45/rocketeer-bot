@@ -95,7 +95,7 @@ function createWebServer(client) {
     // DELETE with no body is safe — no CSRF payload to forge
     if (req.method === 'DELETE' && (!req.headers['content-length'] || req.headers['content-length'] === '0')) return next();
     const ct = req.headers['content-type'] || '';
-    if (!ct.includes('application/json')) {
+    if (!ct.includes('application/json') && !ct.includes('multipart/form-data')) {
       return res.status(415).json({ error: 'Content-Type must be application/json' });
     }
     next();

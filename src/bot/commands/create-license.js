@@ -1,4 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags, AttachmentBuilder } = require('discord.js');
+const path = require('path');
+const fs = require('fs');
 const logger = require('../../logger');
 const config = require('../../config');
 const { getSettings } = require('../../database/settings');
@@ -74,8 +76,20 @@ module.exports = {
 
       await interaction.editReply({ embeds: [embed] });
 
-      // Also send the license into the channel so the customer can see it
-      await interaction.channel.send({ embeds: [embed] });
+      // Send the license into the channel so the customer can see it
+      const channelMsg = { embeds: [embed] };
+
+      // Attach the loader file if one has been uploaded
+      if (settings.loader_file_name) {
+        const loaderPath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', interaction.guild.id, settings.loader_file_name);
+        if (fs.existsSync(loaderPath)) {
+          channelMsg.files = [new AttachmentBuilder(loaderPath, { name: settings.loader_file_name })];
+        } else {
+          logger.warn(`Loader file not found at ${loaderPath}`);
+        }
+      }
+
+      await interaction.channel.send(channelMsg);
 
       // Log to ticket log channel if configured
       if (settings.ticket_log_channel_id) {
