@@ -74,6 +74,9 @@ module.exports = {
 
       await interaction.editReply({ embeds: [embed] });
 
+      // Also send the license into the channel so the customer can see it
+      await interaction.channel.send({ embeds: [embed] });
+
       // Log to ticket log channel if configured
       if (settings.ticket_log_channel_id) {
         try {
