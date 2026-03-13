@@ -359,29 +359,37 @@ module.exports = function (client) {
   });
 
   // Upload loader file
-  router.post('/guild/:guildId/loader', ensureGuildAccess, loaderUpload.single('loader'), (req, res) => {
-    const { guildId } = req.params;
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-
-    try {
-      // Remove any previous loader file
-      const settings = getSettings(guildId);
-      if (settings.loader_file_name) {
-        const oldPath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', guildId, settings.loader_file_name);
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-        }
+  router.post('/guild/:guildId/loader', ensureGuildAccess, (req, res) => {
+    loaderUpload.single('loader')(req, res, (err) => {
+      if (err) {
+        logger.error('Loader upload error:', err);
+        const msg = err.code === 'LIMIT_FILE_SIZE' ? 'File too large (max 100 MB)' : err.message;
+        return res.status(400).json({ error: msg });
       }
 
-      updateSetting(guildId, 'loader_file_name', req.file.filename);
-      logger.info(`Loader uploaded for guild ${guildId}: ${req.file.filename}`);
-      res.json({ success: true, fileName: req.file.filename });
-    } catch (err) {
-      logger.error('Failed to save loader file:', err);
-      res.status(500).json({ error: 'Failed to save loader file' });
-    }
+      const { guildId } = req.params;
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+
+      try {
+        // Remove any previous loader file
+        const settings = getSettings(guildId);
+        if (settings.loader_file_name) {
+          const oldPath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', guildId, settings.loader_file_name);
+          if (fs.existsSync(oldPath)) {
+            fs.unlinkSync(oldPath);
+          }
+        }
+
+        updateSetting(guildId, 'loader_file_name', req.file.filename);
+        logger.info(`Loader uploaded for guild ${guildId}: ${req.file.filename}`);
+        res.json({ success: true, fileName: req.file.filename });
+      } catch (err) {
+        logger.error('Failed to save loader file:', err);
+        res.status(500).json({ error: 'Failed to save loader file' });
+      }
+    });
   });
 
   // Delete loader file
