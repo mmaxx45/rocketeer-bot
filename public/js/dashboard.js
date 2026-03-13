@@ -43,6 +43,19 @@ if (settingsForm) {
       });
       const result = await res.json();
       if (result.success) {
+        // Also save any role prices that are visible
+        const roleBadges = document.querySelectorAll('#license-required-roles-list .license-role-badge');
+        for (const badge of roleBadges) {
+          const roleId = badge.dataset.roleId;
+          const priceInput = badge.querySelector('input[type="number"]');
+          if (roleId && priceInput) {
+            await fetch(`/api/guild/${guildId}/license-role-price`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ roleId, price: priceInput.value || null }),
+            });
+          }
+        }
         showToast('Settings saved successfully!');
       } else {
         showToast(result.error || 'Failed to save settings', 'error');
