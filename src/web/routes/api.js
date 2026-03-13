@@ -3,7 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { ActivityType } = require('discord.js');
-const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels } = require('../../database/settings');
+const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, addLicenseRequiredRole, removeLicenseRequiredRole } = require('../../database/settings');
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const logger = require('../../logger');
@@ -50,7 +50,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id, ticket_open_message } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -172,6 +172,9 @@ module.exports = function (client) {
       if (ticket_log_channel_id !== undefined) {
         updateSetting(guildId, 'ticket_log_channel_id', ticket_log_channel_id || null);
       }
+      if (ticket_open_message !== undefined) {
+        updateSetting(guildId, 'ticket_open_message', ticket_open_message.trim() || null);
+      }
 
       const settings = getSettings(guildId);
       res.json({ success: true, settings });
@@ -199,6 +202,27 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to update exempt channels:', err);
       res.status(500).json({ error: 'Failed to update exempt channels' });
+    }
+  });
+
+  // Update license required roles
+  router.post('/guild/:guildId/license-required-roles', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const { roleId, action } = req.body;
+
+    try {
+      let roles;
+      if (action === 'add') {
+        roles = addLicenseRequiredRole(guildId, roleId);
+      } else if (action === 'remove') {
+        roles = removeLicenseRequiredRole(guildId, roleId);
+      } else {
+        return res.status(400).json({ error: 'Invalid action' });
+      }
+      res.json({ success: true, roles });
+    } catch (err) {
+      logger.error('Failed to update license required roles:', err);
+      res.status(500).json({ error: 'Failed to update license required roles' });
     }
   });
 

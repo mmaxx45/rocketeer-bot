@@ -35,6 +35,8 @@ function getStmts() {
         ticket_admin_role_id: db.prepare(`UPDATE guild_settings SET ticket_admin_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         ticket_log_channel_id: db.prepare(`UPDATE guild_settings SET ticket_log_channel_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         loader_file_name: db.prepare(`UPDATE guild_settings SET loader_file_name = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        ticket_open_message: db.prepare(`UPDATE guild_settings SET ticket_open_message = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        license_required_role_ids: db.prepare(`UPDATE guild_settings SET license_required_role_ids = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }
@@ -80,10 +82,38 @@ function removeExemptChannel(guildId, channelId) {
   return filtered;
 }
 
+function getLicenseRequiredRoles(guildId) {
+  const settings = getSettings(guildId);
+  try {
+    return JSON.parse(settings.license_required_role_ids || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function addLicenseRequiredRole(guildId, roleId) {
+  const roles = getLicenseRequiredRoles(guildId);
+  if (!roles.includes(roleId)) {
+    roles.push(roleId);
+    updateSetting(guildId, 'license_required_role_ids', JSON.stringify(roles));
+  }
+  return roles;
+}
+
+function removeLicenseRequiredRole(guildId, roleId) {
+  const roles = getLicenseRequiredRoles(guildId);
+  const filtered = roles.filter(id => id !== roleId);
+  updateSetting(guildId, 'license_required_role_ids', JSON.stringify(filtered));
+  return filtered;
+}
+
 module.exports = {
   getSettings,
   updateSetting,
   getExemptChannels,
   addExemptChannel,
   removeExemptChannel,
+  getLicenseRequiredRoles,
+  addLicenseRequiredRole,
+  removeLicenseRequiredRole,
 };

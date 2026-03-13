@@ -508,9 +508,13 @@ async function handleButton(interaction) {
       createTicket(interaction.guild.id, interaction.user.id, channel.id);
 
       // Send welcome embed with close button
+      const defaultMsg = `Hey <@${interaction.user.id}>, thanks for your interest! An admin will be with you shortly.\n\nPlease describe what you need and we'll get you sorted.`;
+      const ticketMsg = settings.ticket_open_message
+        ? settings.ticket_open_message.replace(/\{user\}/g, `<@${interaction.user.id}>`)
+        : defaultMsg;
       const welcomeEmbed = new EmbedBuilder()
         .setTitle('Ticket Opened')
-        .setDescription(`Hey <@${interaction.user.id}>, thanks for your interest! An admin will be with you shortly.\n\nPlease describe what you need and we'll get you sorted.`)
+        .setDescription(ticketMsg)
         .setColor(0x5865F2)
         .setTimestamp();
 

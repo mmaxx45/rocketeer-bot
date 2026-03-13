@@ -204,6 +204,18 @@ function runMigrations() {
     db.pragma('user_version = 11');
   }
 
+  if (version < 12) {
+    logger.info('Running database migration v12: add ticket_open_message');
+    safeAddColumn('guild_settings', 'ticket_open_message', 'TEXT DEFAULT NULL');
+    db.pragma('user_version = 12');
+  }
+
+  if (version < 13) {
+    logger.info('Running database migration v13: add license_required_role_ids');
+    safeAddColumn('guild_settings', 'license_required_role_ids', 'TEXT DEFAULT NULL');
+    db.pragma('user_version = 13');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

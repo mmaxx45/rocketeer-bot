@@ -126,6 +126,77 @@ async function removeExemptChannel(guildId, channelId, btn) {
   }
 }
 
+// License required roles
+async function addLicenseRequiredRole(guildId) {
+  const select = document.getElementById('add-license-required-role');
+  const roleId = select.value;
+  if (!roleId) return;
+
+  const roleName = select.options[select.selectedIndex].text;
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/license-required-roles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roleId, action: 'add' }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      const list = document.getElementById('license-required-roles-list');
+      const badge = document.createElement('span');
+      badge.className = 'badge bg-secondary d-flex align-items-center gap-1 py-1 license-role-badge';
+      badge.dataset.roleId = roleId;
+      badge.textContent = roleName;
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'btn-close btn-close-white ms-1';
+      closeBtn.style.cssText = 'font-size: 0.5rem; width: 0.5em; height: 0.5em;';
+      closeBtn.addEventListener('click', () => removeLicenseRequiredRole(guildId, roleId, closeBtn));
+      badge.appendChild(closeBtn);
+      list.appendChild(badge);
+
+      select.querySelector(`option[value="${roleId}"]`).remove();
+      select.value = '';
+
+      showToast('Required role added!');
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function removeLicenseRequiredRole(guildId, roleId, btn) {
+  try {
+    const res = await fetch(`/api/guild/${guildId}/license-required-roles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roleId, action: 'remove' }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      const badge = btn.closest('.license-role-badge');
+      const roleName = badge.textContent.trim();
+      badge.remove();
+
+      const select = document.getElementById('add-license-required-role');
+      if (select) {
+        const option = document.createElement('option');
+        option.value = roleId;
+        option.textContent = roleName;
+        select.appendChild(option);
+      }
+
+      showToast('Required role removed.');
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
 // Loader file upload
 async function uploadLoader(guildId) {
   const input = document.getElementById('loader-file-input');

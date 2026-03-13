@@ -533,6 +533,44 @@ Please review the channel list and post in the most appropriate channel moving f
                 </select>
               </div>
             </div>
+            <div class="col-12">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-person-badge"></i> License Required Roles</label>
+                <span class="setting-hint">Users must have <strong>all</strong> of these roles to keep their license. If a user loses any of these roles (e.g. Patreon), their license is automatically revoked.</span>
+                <div class="d-flex flex-wrap gap-2 mb-3" id="license-required-roles-list">
+                  <% licenseRequiredRoles.forEach(roleId => { %>
+                    <% const role = roles.find(r => r.id === roleId); %>
+                    <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 license-role-badge" data-role-id="<%= roleId %>">
+                      <%= role ? role.name : roleId %>
+                      <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
+                              onclick="removeLicenseRequiredRole('<%= guild.id %>', '<%= roleId %>', this)"></button>
+                    </span>
+                  <% }); %>
+                </div>
+                <div class="input-group">
+                  <select id="add-license-required-role" class="form-select">
+                    <option value="">-- Select role --</option>
+                    <% roles.forEach(role => { %>
+                      <% if (!licenseRequiredRoles.includes(role.id)) { %>
+                        <option value="<%= role.id %>"><%= role.name %></option>
+                      <% } %>
+                    <% }); %>
+                  </select>
+                  <button type="button" class="btn btn-outline-primary"
+                          onclick="addLicenseRequiredRole('<%= guild.id %>')">
+                    <i class="bi bi-plus-lg"></i> Add
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-chat-left-text"></i> Ticket Opened Message</label>
+                <span class="setting-hint">Message shown when a ticket is opened. Use <code>{user}</code> to mention the user. Leave blank for default.</span>
+                <textarea name="ticket_open_message" class="form-control" rows="3"
+                          placeholder="Hey {user}, thanks for your interest! An admin will be with you shortly.&#10;&#10;Please describe what you need and we'll get you sorted."><%= settings.ticket_open_message || '' %></textarea>
+              </div>
+            </div>
             <div class="col-md-6">
               <div class="setting-item">
                 <label class="setting-label"><i class="bi bi-download"></i> Loader File</label>
