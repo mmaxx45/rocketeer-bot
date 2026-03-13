@@ -35,6 +35,20 @@ if (settingsForm) {
       }
     });
 
+    // Collect role prices into the settings payload
+    const roleBadges = document.querySelectorAll('#license-required-roles-list .license-role-badge');
+    if (roleBadges.length > 0) {
+      const prices = {};
+      roleBadges.forEach(badge => {
+        const roleId = badge.dataset.roleId;
+        const priceInput = badge.querySelector('input[type="number"]');
+        if (roleId && priceInput && priceInput.value) {
+          prices[roleId] = parseFloat(priceInput.value);
+        }
+      });
+      data.license_role_prices = prices;
+    }
+
     try {
       const res = await fetch(`/api/guild/${guildId}/settings`, {
         method: 'POST',
@@ -43,19 +57,6 @@ if (settingsForm) {
       });
       const result = await res.json();
       if (result.success) {
-        // Also save any role prices that are visible
-        const roleBadges = document.querySelectorAll('#license-required-roles-list .license-role-badge');
-        for (const badge of roleBadges) {
-          const roleId = badge.dataset.roleId;
-          const priceInput = badge.querySelector('input[type="number"]');
-          if (roleId && priceInput) {
-            await fetch(`/api/guild/${guildId}/license-role-price`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ roleId, price: priceInput.value || null }),
-            });
-          }
-        }
         showToast('Settings saved successfully!');
       } else {
         showToast(result.error || 'Failed to save settings', 'error');
