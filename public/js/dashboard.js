@@ -133,6 +133,8 @@ async function addLicenseRequiredRole(guildId) {
   if (!roleId) return;
 
   const roleName = select.options[select.selectedIndex].text;
+  const priceInput = document.getElementById('add-license-role-price');
+  const price = priceInput ? priceInput.value : '';
 
   try {
     const res = await fetch(`/api/guild/${guildId}/license-required-roles`, {
@@ -142,21 +144,35 @@ async function addLicenseRequiredRole(guildId) {
     });
     const result = await res.json();
     if (result.success) {
+      // Save price if provided
+      if (price) {
+        await fetch(`/api/guild/${guildId}/license-role-price`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roleId, price }),
+        });
+      }
+
       const list = document.getElementById('license-required-roles-list');
-      const badge = document.createElement('span');
-      badge.className = 'badge bg-secondary d-flex align-items-center gap-1 py-1 license-role-badge';
-      badge.dataset.roleId = roleId;
-      badge.textContent = roleName;
-      const closeBtn = document.createElement('button');
-      closeBtn.type = 'button';
-      closeBtn.className = 'btn-close btn-close-white ms-1';
-      closeBtn.style.cssText = 'font-size: 0.5rem; width: 0.5em; height: 0.5em;';
-      closeBtn.addEventListener('click', () => removeLicenseRequiredRole(guildId, roleId, closeBtn));
-      badge.appendChild(closeBtn);
-      list.appendChild(badge);
+      const row = document.createElement('div');
+      row.className = 'd-flex align-items-center gap-2 license-role-badge';
+      row.dataset.roleId = roleId;
+      row.innerHTML = `
+        <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 px-2">${roleName}</span>
+        <div class="input-group input-group-sm" style="width: 140px;">
+          <span class="input-group-text" style="font-size: 0.8rem;">$</span>
+          <input type="number" class="form-control" step="0.01" min="0" placeholder="Price"
+                 value="${price}" onchange="setRolePrice('${guildId}', '${roleId}', this.value)">
+        </div>
+        <button type="button" class="btn-close btn-close-white" style="font-size: 0.5rem;"></button>`;
+      row.querySelector('.btn-close').addEventListener('click', function () {
+        removeLicenseRequiredRole(guildId, roleId, this);
+      });
+      list.appendChild(row);
 
       select.querySelector(`option[value="${roleId}"]`).remove();
       select.value = '';
+      if (priceInput) priceInput.value = '';
 
       showToast('Required role added!');
     } else {
@@ -176,8 +192,15 @@ async function removeLicenseRequiredRole(guildId, roleId, btn) {
     });
     const result = await res.json();
     if (result.success) {
+      // Also clear the price
+      await fetch(`/api/guild/${guildId}/license-role-price`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roleId, price: null }),
+      });
+
       const badge = btn.closest('.license-role-badge');
-      const roleName = badge.textContent.trim();
+      const roleName = badge.querySelector('.badge').textContent.trim();
       badge.remove();
 
       const select = document.getElementById('add-license-required-role');
@@ -189,6 +212,24 @@ async function removeLicenseRequiredRole(guildId, roleId, btn) {
       }
 
       showToast('Required role removed.');
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function setRolePrice(guildId, roleId, price) {
+  try {
+    const res = await fetch(`/api/guild/${guildId}/license-role-price`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roleId, price: price || null }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Price updated!');
     } else {
       showToast(result.error || 'Failed', 'error');
     }

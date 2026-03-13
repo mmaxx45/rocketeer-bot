@@ -18,6 +18,9 @@
     <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
       <i class="bi bi-exclamation-triangle"></i> View Warnings
     </a>
+    <a href="/dashboard/guild/<%= guild.id %>/licenses" class="btn btn-outline-success">
+      <i class="bi bi-key"></i> License Stats
+    </a>
     <a href="/dashboard/guild/<%= guild.id %>/stats" class="btn btn-outline-info">
       <i class="bi bi-bar-chart-line"></i> Stats
     </a>
@@ -536,15 +539,24 @@ Please review the channel list and post in the most appropriate channel moving f
             <div class="col-12">
               <div class="setting-item">
                 <label class="setting-label"><i class="bi bi-person-badge"></i> License Required Roles</label>
-                <span class="setting-hint">Users must have <strong>all</strong> of these roles to keep their license. If a user loses any of these roles (e.g. Patreon), their license is automatically revoked.</span>
-                <div class="d-flex flex-wrap gap-2 mb-3" id="license-required-roles-list">
+                <span class="setting-hint">Users must have <strong>at least one</strong> of these roles to keep their license. If a user loses all of these roles (e.g. Patreon), their license is automatically revoked.</span>
+                <div class="d-flex flex-column gap-2 mb-3" id="license-required-roles-list">
                   <% licenseRequiredRoles.forEach(roleId => { %>
                     <% const role = roles.find(r => r.id === roleId); %>
-                    <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 license-role-badge" data-role-id="<%= roleId %>">
-                      <%= role ? role.name : roleId %>
-                      <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
+                    <% const price = licenseRolePrices[roleId]; %>
+                    <div class="d-flex align-items-center gap-2 license-role-badge" data-role-id="<%= roleId %>">
+                      <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 px-2">
+                        <%= role ? role.name : roleId %>
+                      </span>
+                      <div class="input-group input-group-sm" style="width: 140px;">
+                        <span class="input-group-text" style="font-size: 0.8rem;">$</span>
+                        <input type="number" class="form-control" step="0.01" min="0" placeholder="Price"
+                               value="<%= price != null ? price : '' %>"
+                               onchange="setRolePrice('<%= guild.id %>', '<%= roleId %>', this.value)">
+                      </div>
+                      <button type="button" class="btn-close btn-close-white" style="font-size: 0.5rem;"
                               onclick="removeLicenseRequiredRole('<%= guild.id %>', '<%= roleId %>', this)"></button>
-                    </span>
+                    </div>
                   <% }); %>
                 </div>
                 <div class="input-group">
@@ -556,6 +568,11 @@ Please review the channel list and post in the most appropriate channel moving f
                       <% } %>
                     <% }); %>
                   </select>
+                  <div class="input-group-text" style="font-size: 0.8rem; padding: 0;">
+                    <span class="input-group-text border-0" style="font-size: 0.8rem;">$</span>
+                    <input type="number" class="form-control border-0" id="add-license-role-price" step="0.01" min="0"
+                           placeholder="Price" style="width: 80px; font-size: 0.85rem;">
+                  </div>
                   <button type="button" class="btn btn-outline-primary"
                           onclick="addLicenseRequiredRole('<%= guild.id %>')">
                     <i class="bi bi-plus-lg"></i> Add

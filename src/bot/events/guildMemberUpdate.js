@@ -1,5 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { getSettings, getLicenseRequiredRoles } = require('../../database/settings');
+const { addModAction } = require('../../database/modactions');
 const config = require('../../config');
 const logger = require('../../logger');
 
@@ -17,12 +18,17 @@ module.exports = {
     const requiredRoles = getLicenseRequiredRoles(guildId);
     if (requiredRoles.length === 0) return;
 
-    // Check if user lost a required role
+    // Check if user still has at least one required role
+    const hasAnyRequired = requiredRoles.some(roleId => newMember.roles.cache.has(roleId));
+    if (hasAnyRequired) return;
+
+    // Check the user actually had at least one before (don't revoke on unrelated changes)
+    const hadAnyBefore = requiredRoles.some(roleId => oldMember.roles.cache.has(roleId));
+    if (!hadAnyBefore) return;
+
     const lostRoles = requiredRoles.filter(
       roleId => oldMember.roles.cache.has(roleId) && !newMember.roles.cache.has(roleId)
     );
-
-    if (lostRoles.length === 0) return;
 
     // User lost a required role — revoke their license
     if (!config.licensing.apiUrl || !config.licensing.apiKey) {
@@ -66,6 +72,7 @@ module.exports = {
 
       if (revokeRes.ok) {
         logger.info(`License auto-revoked for ${newMember.user.username} (lost roles: ${lostRoleNames})`);
+        addModAction(guildId, newMember.client.user.id, 'license_revoke', newMember.id, `Auto-revoked: lost role(s) ${lostRoleNames}`);
       } else {
         const errorMsg = revokeData.error || revokeData.message || 'Unknown error';
         logger.error(`License revocation API error for ${newMember.user.username}: ${errorMsg}`);

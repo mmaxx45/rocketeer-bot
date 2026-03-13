@@ -3,7 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { ActivityType } = require('discord.js');
-const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, addLicenseRequiredRole, removeLicenseRequiredRole } = require('../../database/settings');
+const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, addLicenseRequiredRole, removeLicenseRequiredRole, setLicenseRolePrice } = require('../../database/settings');
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const logger = require('../../logger');
@@ -223,6 +223,20 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to update license required roles:', err);
       res.status(500).json({ error: 'Failed to update license required roles' });
+    }
+  });
+
+  // Update license role price
+  router.post('/guild/:guildId/license-role-price', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const { roleId, price } = req.body;
+
+    try {
+      const prices = setLicenseRolePrice(guildId, roleId, price);
+      res.json({ success: true, prices });
+    } catch (err) {
+      logger.error('Failed to update license role price:', err);
+      res.status(500).json({ error: 'Failed to update license role price' });
     }
   });
 

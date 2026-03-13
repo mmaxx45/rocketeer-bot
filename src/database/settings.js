@@ -37,6 +37,7 @@ function getStmts() {
         loader_file_name: db.prepare(`UPDATE guild_settings SET loader_file_name = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         ticket_open_message: db.prepare(`UPDATE guild_settings SET ticket_open_message = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         license_required_role_ids: db.prepare(`UPDATE guild_settings SET license_required_role_ids = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        license_role_prices: db.prepare(`UPDATE guild_settings SET license_role_prices = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }
@@ -107,6 +108,26 @@ function removeLicenseRequiredRole(guildId, roleId) {
   return filtered;
 }
 
+function getLicenseRolePrices(guildId) {
+  const settings = getSettings(guildId);
+  try {
+    return JSON.parse(settings.license_role_prices || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function setLicenseRolePrice(guildId, roleId, price) {
+  const prices = getLicenseRolePrices(guildId);
+  if (price === null || price === undefined || price === '') {
+    delete prices[roleId];
+  } else {
+    prices[roleId] = parseFloat(price);
+  }
+  updateSetting(guildId, 'license_role_prices', JSON.stringify(prices));
+  return prices;
+}
+
 module.exports = {
   getSettings,
   updateSetting,
@@ -116,4 +137,6 @@ module.exports = {
   getLicenseRequiredRoles,
   addLicenseRequiredRole,
   removeLicenseRequiredRole,
+  getLicenseRolePrices,
+  setLicenseRolePrice,
 };

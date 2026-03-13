@@ -1,0 +1,349 @@
+<%- header %>
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/dashboard">Servers</a></li>
+    <li class="breadcrumb-item"><a href="/dashboard/guild/<%= guild.id %>"><%= guild.name %></a></li>
+    <li class="breadcrumb-item active">License Stats</li>
+  </ol>
+</nav>
+
+<div class="guild-page-header mb-4">
+  <div class="guild-title">
+    <% if (guild.icon) { %>
+      <img src="<%= guild.icon %>?size=80" class="guild-icon-sm" alt="icon">
+    <% } %>
+    <div>
+      <h2><%= guild.name %></h2>
+      <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">License Statistics</p>
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/dashboard/guild/<%= guild.id %>/stats" class="btn btn-outline-info">
+      <i class="bi bi-bar-chart-line"></i> Stats
+    </a>
+    <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
+      <i class="bi bi-exclamation-triangle"></i> Warnings
+    </a>
+    <a href="/dashboard/guild/<%= guild.id %>" class="btn btn-outline-primary">
+      <i class="bi bi-gear"></i> Settings
+    </a>
+  </div>
+</div>
+
+<!-- Overview Cards -->
+<div class="warnings-stats mb-4">
+  <div class="stat-card">
+    <div class="stat-value"><%= totalLicensedMembers %></div>
+    <div class="stat-label">Licensed Members</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value"><%= totalServerMembers %></div>
+    <div class="stat-label">Total Members</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value"><%= totalLicensedMembers > 0 ? Math.round((totalLicensedMembers / totalServerMembers) * 100) : 0 %>%</div>
+    <div class="stat-label">Licensed Rate</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value"><%= revocationCount %></div>
+    <div class="stat-label">Total Revocations</div>
+  </div>
+</div>
+
+<% if (roleStats.length === 0) { %>
+  <div class="settings-section mb-4">
+    <div class="section-body">
+      <div class="stats-empty-mini">
+        <i class="bi bi-person-badge"></i>
+        <p>No license required roles configured. Add roles in <a href="/dashboard/guild/<%= guild.id %>#section-tickets">Settings</a>.</p>
+      </div>
+    </div>
+  </div>
+<% } else { %>
+
+<!-- Revenue Section -->
+<% const hasAnyPrice = roleStats.some(r => r.price > 0); %>
+<% if (hasAnyPrice) { %>
+<div class="settings-section mb-4">
+  <div class="section-header">
+    <i class="bi bi-currency-dollar"></i>
+    <h5>Revenue</h5>
+  </div>
+  <div class="section-body">
+    <!-- Role filter toggles -->
+    <div class="d-flex flex-wrap gap-2 mb-4">
+      <button class="btn btn-sm btn-primary revenue-filter active" data-filter="all">All Roles</button>
+      <% roleStats.forEach(role => { %>
+        <% if (role.price > 0) { %>
+          <button class="btn btn-sm btn-outline-secondary revenue-filter" data-filter="<%= role.id %>"
+                  style="border-color: <%= role.color %>; color: <%= role.color %>;">
+            <%= role.name %> Only
+          </button>
+        <% } %>
+      <% }); %>
+    </div>
+
+    <!-- Revenue cards (updated by JS) -->
+    <div class="warnings-stats" id="revenue-cards">
+      <div class="stat-card">
+        <div class="stat-value" id="revenue-total" style="color: #2ecc71;">$0</div>
+        <div class="stat-label">Monthly Revenue</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="revenue-members">0</div>
+        <div class="stat-label">Paying Members</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="revenue-avg" style="color: #e67e22;">$0</div>
+        <div class="stat-label">Avg. per Member</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="revenue-annual" style="color: #3498db;">$0</div>
+        <div class="stat-label">Projected Annual</div>
+      </div>
+    </div>
+
+    <!-- Per-role breakdown table -->
+    <div class="table-responsive mt-4" id="revenue-breakdown">
+      <table class="table table-dark table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Role</th>
+            <th>Members</th>
+            <th>Price</th>
+            <th>Monthly</th>
+            <th>Annual</th>
+          </tr>
+        </thead>
+        <tbody id="revenue-breakdown-body">
+        </tbody>
+        <tfoot>
+          <tr style="font-weight: 600; border-top: 2px solid rgba(255,255,255,0.1);">
+            <td>Total</td>
+            <td id="revenue-table-members">0</td>
+            <td>--</td>
+            <td id="revenue-table-monthly">$0</td>
+            <td id="revenue-table-annual">$0</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+<% } else { %>
+<div class="settings-section mb-4">
+  <div class="section-body">
+    <div class="stats-empty-mini">
+      <i class="bi bi-currency-dollar"></i>
+      <p>Set prices for your roles in <a href="/dashboard/guild/<%= guild.id %>#section-tickets">Settings</a> to see revenue stats.</p>
+    </div>
+  </div>
+</div>
+<% } %>
+
+<!-- Role Breakdown -->
+<div class="settings-section mb-4">
+  <div class="section-header">
+    <i class="bi bi-person-badge"></i>
+    <h5>Role Breakdown</h5>
+  </div>
+  <div class="section-body">
+    <% const maxRoleCount = Math.max(...roleStats.map(r => r.currentCount), 1); %>
+    <div class="stats-bar-chart">
+      <% roleStats.forEach(role => { %>
+        <div class="bar-chart-row">
+          <div class="bar-chart-label bar-chart-label-wide">
+            <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: <%= role.color %>; margin-right: 6px;"></span>
+            <%= role.name %>
+            <% if (!role.exists) { %>
+              <span class="text-danger" style="font-size: 0.75rem;">(deleted)</span>
+            <% } %>
+            <% if (role.price > 0) { %>
+              <span style="color: #2ecc71; font-size: 0.8rem; margin-left: 4px;">$<%= role.price.toFixed(2) %></span>
+            <% } %>
+          </div>
+          <div class="bar-chart-track">
+            <div class="bar-chart-fill" style="width: <%= (role.currentCount / maxRoleCount) * 100 %>%; background: <%= role.color %>;"></div>
+          </div>
+          <div class="bar-chart-value"><%= role.currentCount %></div>
+        </div>
+      <% }); %>
+    </div>
+  </div>
+</div>
+
+<!-- Role Distribution Chart -->
+<div class="settings-section mb-4">
+  <div class="section-header">
+    <i class="bi bi-pie-chart"></i>
+    <h5>Role Distribution</h5>
+  </div>
+  <div class="section-body">
+    <% if (roleStats.every(r => r.currentCount === 0)) { %>
+      <div class="stats-empty-mini">
+        <i class="bi bi-pie-chart"></i>
+        <p>No members currently hold any required roles.</p>
+      </div>
+    <% } else { %>
+      <div style="position: relative; height: 300px; max-width: 500px; margin: 0 auto;">
+        <canvas id="role-distribution-chart"></canvas>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<% } %>
+
+<!-- Recent Revocations -->
+<div class="settings-section mb-4">
+  <div class="section-header">
+    <i class="bi bi-shield-x"></i>
+    <h5>Recent Revocations</h5>
+  </div>
+  <div class="section-body p-0">
+    <% if (revocations.length === 0) { %>
+      <div class="stats-empty-mini" style="padding: 2rem;">
+        <i class="bi bi-shield-check"></i>
+        <p>No licenses have been auto-revoked yet.</p>
+      </div>
+    <% } else { %>
+      <div class="table-responsive">
+        <table class="table table-dark table-striped table-hover mb-0">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Reason</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% revocations.forEach(rev => { %>
+              <tr>
+                <td>
+                  <% if (userMap[rev.target_id]) { %>
+                    <span class="user-display" title="Click to copy ID" onclick="copyId(this, '<%= rev.target_id %>')">@<%= userMap[rev.target_id] %></span>
+                  <% } else { %>
+                    <span class="user-id-cell user-id-copy" title="Click to copy ID" onclick="copyId(this, '<%= rev.target_id %>')"><%= rev.target_id %></span>
+                  <% } %>
+                </td>
+                <td style="max-width: 350px;">
+                  <span class="text-muted"><%= rev.details || '--' %></span>
+                </td>
+                <td style="white-space: nowrap; color: var(--text-secondary); font-size: 0.85rem;">
+                  <%= new Date(rev.created_at + 'Z').toLocaleString() %>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<script>
+(function () {
+  // Doughnut chart
+  const canvas = document.getElementById('role-distribution-chart');
+  if (canvas) {
+    const roleData = <%- JSON.stringify(roleStats.filter(r => r.currentCount > 0).map(r => ({ name: r.name, count: r.currentCount, color: r.color }))) %>;
+    new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: roleData.map(r => r.name),
+        datasets: [{
+          data: roleData.map(r => r.count),
+          backgroundColor: roleData.map(r => r.color),
+          borderColor: 'rgba(30, 31, 34, 0.8)',
+          borderWidth: 2,
+          hoverOffset: 8,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { color: '#b5bac1', padding: 16, usePointStyle: true, pointStyleWidth: 10, font: { size: 13 } },
+          },
+          tooltip: {
+            backgroundColor: 'rgba(30, 31, 34, 0.95)',
+            titleColor: '#fff',
+            bodyColor: '#b5bac1',
+            borderColor: 'rgba(88, 101, 242, 0.5)',
+            borderWidth: 1,
+            padding: 10,
+            callbacks: {
+              label: function (ctx) {
+                const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = Math.round((ctx.parsed / total) * 100);
+                return ctx.label + ': ' + ctx.parsed + ' (' + pct + '%)';
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  // Revenue filtering
+  const allRoles = <%- JSON.stringify(roleStats.filter(r => r.price > 0).map(r => ({ id: r.id, name: r.name, count: r.currentCount, price: r.price, color: r.color }))) %>;
+  if (allRoles.length === 0) return;
+
+  function fmt(n) { return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+  function updateRevenue(filter) {
+    const roles = filter === 'all' ? allRoles : allRoles.filter(r => r.id === filter);
+
+    let totalMonthly = 0;
+    let totalMembers = 0;
+    const tbody = document.getElementById('revenue-breakdown-body');
+    tbody.innerHTML = '';
+
+    roles.forEach(r => {
+      const monthly = r.count * r.price;
+      const annual = monthly * 12;
+      totalMonthly += monthly;
+      totalMembers += r.count;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${r.color}; margin-right: 6px;"></span>${r.name}</td>
+        <td>${r.count}</td>
+        <td>${fmt(r.price)}</td>
+        <td style="color: #2ecc71;">${fmt(monthly)}</td>
+        <td style="color: #3498db;">${fmt(annual)}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    const avg = totalMembers > 0 ? totalMonthly / totalMembers : 0;
+    document.getElementById('revenue-total').textContent = fmt(totalMonthly);
+    document.getElementById('revenue-members').textContent = totalMembers;
+    document.getElementById('revenue-avg').textContent = fmt(avg);
+    document.getElementById('revenue-annual').textContent = fmt(totalMonthly * 12);
+    document.getElementById('revenue-table-members').textContent = totalMembers;
+    document.getElementById('revenue-table-monthly').textContent = fmt(totalMonthly);
+    document.getElementById('revenue-table-annual').textContent = fmt(totalMonthly * 12);
+  }
+
+  // Filter button handlers
+  document.querySelectorAll('.revenue-filter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.revenue-filter').forEach(b => {
+        b.classList.remove('active', 'btn-primary');
+        b.classList.add('btn-outline-secondary');
+      });
+      btn.classList.remove('btn-outline-secondary');
+      btn.classList.add('active', 'btn-primary');
+      updateRevenue(btn.dataset.filter);
+    });
+  });
+
+  // Initial load
+  updateRevenue('all');
+})();
+</script>
+
+<%- footer %>

@@ -1,5 +1,5 @@
 const express = require('express');
-const { getSettings, getExemptChannels, getLicenseRequiredRoles } = require('../../database/settings');
+const { getSettings, getExemptChannels, getLicenseRequiredRoles, getLicenseRolePrices } = require('../../database/settings');
 const { getAllGuildWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const { MANAGE_GUILD, userCanManageGuild } = require('../middleware/auth');
@@ -101,6 +101,7 @@ module.exports = function (client) {
     const settings = getSettings(guildId);
     const exemptChannels = getExemptChannels(guildId);
     const licenseRequiredRoles = getLicenseRequiredRoles(guildId);
+    const licenseRolePrices = getLicenseRolePrices(guildId);
 
     const roles = botGuild.roles.cache
       .filter(r => r.id !== guildId) // exclude @everyone
@@ -125,6 +126,7 @@ module.exports = function (client) {
       settings,
       exemptChannels,
       licenseRequiredRoles,
+      licenseRolePrices,
       roles,
       channels,
       categories,
@@ -161,6 +163,78 @@ module.exports = function (client) {
       page,
       totalPages,
       total,
+      userMap,
+    });
+  });
+
+  // License stats page
+  router.get('/guild/:guildId/licenses', async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!userCanManageGuild(req.user, guildId)) {
+      return res.status(403).send('Forbidden');
+    }
+
+    const botGuild = client.guilds.cache.get(guildId);
+    if (!botGuild) return res.status(404).send('Bot is not in this guild');
+
+    const requiredRoles = getLicenseRequiredRoles(guildId);
+    const rolePrices = getLicenseRolePrices(guildId);
+
+    // Build role stats: for each required role, count current holders
+    const roleStats = [];
+    for (const roleId of requiredRoles) {
+      const role = botGuild.roles.cache.get(roleId);
+      const price = rolePrices[roleId] || 0;
+      if (!role) {
+        roleStats.push({ id: roleId, name: roleId, color: '#99aab5', currentCount: 0, price, exists: false });
+        continue;
+      }
+      roleStats.push({
+        id: role.id,
+        name: role.name,
+        color: role.hexColor === '#000000' ? '#99aab5' : role.hexColor,
+        currentCount: role.members.size,
+        price,
+        exists: true,
+      });
+    }
+
+    // Count total members with at least one required role
+    const membersWithAnyRole = new Set();
+    for (const roleId of requiredRoles) {
+      const role = botGuild.roles.cache.get(roleId);
+      if (role) {
+        role.members.forEach(m => membersWithAnyRole.add(m.id));
+      }
+    }
+
+    // Get revocation logs from mod_actions
+    const revocations = db.prepare(`
+      SELECT * FROM mod_actions
+      WHERE guild_id = ? AND action_type = 'license_revoke'
+      ORDER BY created_at DESC
+      LIMIT 25
+    `).all(guildId);
+
+    const revocationCount = db.prepare(`
+      SELECT COUNT(*) as count FROM mod_actions
+      WHERE guild_id = ? AND action_type = 'license_revoke'
+    `).get(guildId).count;
+
+    const allIds = revocations.flatMap(r => [r.target_id, r.moderator_id].filter(Boolean));
+    const userMap = await resolveUserNames(botGuild, allIds);
+
+    const guild = { id: botGuild.id, name: botGuild.name, icon: botGuild.iconURL() };
+    res.render('licenses', {
+      user: req.user,
+      guild,
+      title: guild.name + ' - License Stats',
+      roleStats,
+      totalLicensedMembers: membersWithAnyRole.size,
+      totalServerMembers: botGuild.memberCount,
+      revocations,
+      revocationCount,
       userMap,
     });
   });

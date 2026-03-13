@@ -216,6 +216,12 @@ function runMigrations() {
     db.pragma('user_version = 13');
   }
 
+  if (version < 14) {
+    logger.info('Running database migration v14: add license_role_prices');
+    safeAddColumn('guild_settings', 'license_role_prices', 'TEXT DEFAULT NULL');
+    db.pragma('user_version = 14');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 
