@@ -33,6 +33,7 @@ function createWebServer(client) {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://ajax.cloudflare.com", "https://static.cloudflareinsights.com"],
+        scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
         fontSrc: ["'self'", "https://cdn.jsdelivr.net"],
         imgSrc: ["'self'", "https://cdn.discordapp.com", "data:"],
