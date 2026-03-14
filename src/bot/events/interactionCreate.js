@@ -1,4 +1,6 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
+const path = require('path');
+const fs = require('fs');
 const logger = require('../../logger');
 const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
@@ -652,6 +654,150 @@ async function handleButton(interaction) {
     return;
   }
 
+  if (action === 'retrieve_license') {
+    if (!checkCooldown(interaction.user.id, 'retrieve_license')) {
+      return interaction.reply({ content: 'Please wait before trying again.', flags: MessageFlags.Ephemeral });
+    }
+
+    const config = require('../../config');
+    const settings = getSettings(interaction.guild.id);
+
+    if (!config.licensing.apiUrl || !config.licensing.apiKey) {
+      return interaction.reply({ content: 'Licensing system is not configured. Please contact an admin.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (!settings.ticket_category_id) {
+      return interaction.reply({ content: 'Ticket system is not configured yet. An admin needs to set a ticket category in the dashboard.', flags: MessageFlags.Ephemeral });
+    }
+
+    // Check for existing open ticket
+    const existing = getOpenTicketByUser(interaction.guild.id, interaction.user.id);
+    if (existing) {
+      return interaction.reply({ content: `You already have an open ticket: <#${existing.channel_id}>`, flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    try {
+      // Look up the user's license
+      const searchRes = await fetch(
+        `${config.licensing.apiUrl}/api/v1/licenses?search=${encodeURIComponent(interaction.user.username)}`,
+        { headers: { 'Authorization': `Bearer ${config.licensing.apiKey}` } }
+      );
+
+      if (!searchRes.ok) {
+        logger.error(`License search API error: ${searchRes.status}`);
+        return interaction.editReply({ content: 'Failed to look up your license. Please contact an admin.' });
+      }
+
+      const searchData = await searchRes.json();
+      const licenses = searchData.licenses || searchData.data || searchData;
+      const list = Array.isArray(licenses) ? licenses : [];
+
+      const license = list.find(l => l.status === 'active' || l.status === 'suspended');
+      if (!license) {
+        return interaction.editReply({ content: 'You don\'t have an active license. If you believe this is an error, please contact an admin.' });
+      }
+
+      // Create a private ticket channel
+      const { ChannelType, PermissionFlagsBits: Perms } = require('discord.js');
+
+      const overwrites = [
+        { id: interaction.guild.roles.everyone.id, deny: [Perms.ViewChannel] },
+        { id: interaction.user.id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ReadMessageHistory] },
+        { id: interaction.client.user.id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ManageChannels] },
+      ];
+
+      if (settings.ticket_admin_role_id) {
+        overwrites.push({ id: settings.ticket_admin_role_id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ReadMessageHistory] });
+      }
+
+      const channel = await interaction.guild.channels.create({
+        name: `license-${interaction.user.username}`.slice(0, 100),
+        type: ChannelType.GuildText,
+        parent: settings.ticket_category_id,
+        permissionOverwrites: overwrites,
+      });
+
+      createTicket(interaction.guild.id, interaction.user.id, channel.id);
+
+      // Build the license embed
+      const licenseEmbed = new EmbedBuilder()
+        .setTitle('Your License')
+        .setColor(0x2ECC71)
+        .addFields(
+          { name: 'User', value: `<@${interaction.user.id}> (${interaction.user.username})`, inline: true },
+          { name: 'Status', value: license.status.charAt(0).toUpperCase() + license.status.slice(1), inline: true },
+          { name: 'License Key', value: `\`\`\`\n${license.license_key}\n\`\`\`` },
+        )
+        .setTimestamp();
+
+      if (license.expires_at) {
+        licenseEmbed.addFields({ name: 'Expires', value: new Date(license.expires_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), inline: true });
+      }
+
+      const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`close_ticket:${channel.id}`)
+          .setLabel('Close Ticket')
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      // Send welcome message
+      await channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('License Retrieved')
+            .setDescription(`Hey <@${interaction.user.id}>, here is your license information. If you need further help, an admin will assist you.`)
+            .setColor(0x3498DB)
+            .setTimestamp(),
+        ],
+        components: [closeRow],
+      });
+
+      // Send the license key and loader
+      const channelMsg = { embeds: [licenseEmbed] };
+
+      if (settings.loader_file_name) {
+        const loaderPath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', interaction.guild.id, settings.loader_file_name);
+        if (fs.existsSync(loaderPath)) {
+          channelMsg.files = [new AttachmentBuilder(loaderPath, { name: settings.loader_file_name })];
+        } else {
+          logger.warn(`Loader file not found at ${loaderPath}`);
+        }
+      }
+
+      await channel.send(channelMsg);
+
+      await interaction.editReply({ content: `Your license has been sent in a private channel: <#${channel.id}>` });
+      logger.info(`License retrieval ticket created: channel=${channel.name} user=${interaction.user.username}`);
+
+      // Log to ticket log channel if configured
+      if (settings.ticket_log_channel_id) {
+        try {
+          const logChannel = await interaction.guild.channels.fetch(settings.ticket_log_channel_id);
+          if (logChannel) {
+            const logEmbed = new EmbedBuilder()
+              .setTitle('License Retrieved')
+              .setColor(0x3498DB)
+              .addFields(
+                { name: 'User', value: `<@${interaction.user.id}> (${interaction.user.username})`, inline: true },
+                { name: 'Channel', value: `<#${channel.id}>`, inline: true },
+              )
+              .setTimestamp();
+            await logChannel.send({ embeds: [logEmbed] });
+          }
+        } catch (err) {
+          logger.warn(`Failed to log license retrieval: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      logger.error(`Failed to create license retrieval ticket: ${err.message}`);
+      await interaction.editReply({ content: `Failed to retrieve license: ${err.message}` });
+    }
+    return;
+  }
+
   if (action === 'modactions_page') {
     const targetUserId = params[0];
     let page = parseInt(params[1], 10);
@@ -813,7 +959,7 @@ async function handleHwidResetModal(interaction) {
     const resetData = await resetRes.json();
 
     if (resetRes.ok) {
-      await interaction.editReply({ content: `Your HWID has been reset successfully. You can now activate on your new device.\n**Reason:** ${reason}` });
+      await interaction.editReply({ content: `HWID Reset Request received. Please wait until it gets approved by an admin.\n**Reason:** ${reason}` });
       logger.info(`HWID reset for ${interaction.user.username} (license: ${license.license_key.slice(0, 4)}...) reason: ${reason}`);
 
       // Log to ticket log channel if configured
