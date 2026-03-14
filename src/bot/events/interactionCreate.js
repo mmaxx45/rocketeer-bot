@@ -472,10 +472,15 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'Please wait before trying again.', flags: MessageFlags.Ephemeral });
     }
 
+    const config = require('../../config');
     const settings = getSettings(interaction.guild.id);
 
     if (!settings.ticket_category_id) {
       return interaction.reply({ content: 'Ticket system is not configured yet. An admin needs to set a ticket category in the dashboard.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (!config.licensing.apiUrl || !config.licensing.apiKey) {
+      return interaction.reply({ content: 'Licensing system is not configured. Please contact an admin.', flags: MessageFlags.Ephemeral });
     }
 
     // Check for existing open ticket
@@ -487,6 +492,20 @@ async function handleButton(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
+      // Check if user already has an active license
+      const searchRes = await fetch(
+        `${config.licensing.apiUrl}/api/v1/licenses?search=${encodeURIComponent(interaction.user.username)}`,
+        { headers: { 'Authorization': `Bearer ${config.licensing.apiKey}` } }
+      );
+
+      let hasExistingLicense = false;
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        const licenses = searchData.licenses || searchData.data || searchData;
+        const list = Array.isArray(licenses) ? licenses : [];
+        hasExistingLicense = !!list.find(l => l.status === 'active' || l.status === 'suspended');
+      }
+
       const { ChannelType, PermissionFlagsBits: Perms } = require('discord.js');
 
       // Build permission overwrites
@@ -509,17 +528,6 @@ async function handleButton(interaction) {
 
       createTicket(interaction.guild.id, interaction.user.id, channel.id);
 
-      // Send welcome embed with close button
-      const defaultMsg = `Hey <@${interaction.user.id}>, thanks for your interest! An admin will be with you shortly.\n\nPlease describe what you need and we'll get you sorted.`;
-      const ticketMsg = settings.ticket_open_message
-        ? settings.ticket_open_message.replace(/\{user\}/g, `<@${interaction.user.id}>`)
-        : defaultMsg;
-      const welcomeEmbed = new EmbedBuilder()
-        .setTitle('Ticket Opened')
-        .setDescription(ticketMsg)
-        .setColor(0x5865F2)
-        .setTimestamp();
-
       const closeRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`close_ticket:${channel.id}`)
@@ -527,19 +535,183 @@ async function handleButton(interaction) {
           .setStyle(ButtonStyle.Danger)
       );
 
-      await channel.send({ embeds: [welcomeEmbed], components: [closeRow] });
+      if (hasExistingLicense) {
+        // User already has a license — just open a help ticket
+        const helpEmbed = new EmbedBuilder()
+          .setTitle('You Already Have a License')
+          .setDescription(`Hey <@${interaction.user.id}>, you already have an active license.\n\nIf you need help, an admin will be with you shortly.`)
+          .setColor(0xE67E22)
+          .setTimestamp();
 
-      // Ping admin role if configured
-      if (settings.ticket_admin_role_id) {
-        await channel.send({ content: `<@&${settings.ticket_admin_role_id}>`, allowedMentions: { roles: [settings.ticket_admin_role_id] } });
+        await channel.send({ embeds: [helpEmbed], components: [closeRow] });
+
+        if (settings.ticket_admin_role_id) {
+          await channel.send({ content: `<@&${settings.ticket_admin_role_id}>`, allowedMentions: { roles: [settings.ticket_admin_role_id] } });
+        }
+
+        await interaction.editReply({ content: `Your ticket has been created: <#${channel.id}>` });
+        logger.info(`License help ticket created (existing license): channel=${channel.name} user=${interaction.user.username}`);
+
+        if (settings.ticket_log_channel_id) {
+          try {
+            const logChannel = await interaction.guild.channels.fetch(settings.ticket_log_channel_id);
+            if (logChannel) {
+              const logEmbed = new EmbedBuilder()
+                .setTitle('Help Ticket Opened (Existing License)')
+                .setColor(0xE67E22)
+                .addFields(
+                  { name: 'User', value: `<@${interaction.user.id}> (${interaction.user.username})`, inline: true },
+                  { name: 'Channel', value: `<#${channel.id}>`, inline: true },
+                )
+                .setTimestamp();
+              await logChannel.send({ embeds: [logEmbed] });
+            }
+          } catch (err) {
+            logger.warn(`Failed to log help ticket: ${err.message}`);
+          }
+        }
+      } else {
+        // Auto-provision a license
+        const licenseRes = await fetch(`${config.licensing.apiUrl}/api/v1/licenses`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.licensing.apiKey}`,
+          },
+          body: JSON.stringify({
+            discord_user: interaction.user.username,
+            expires_in_days: null,
+          }),
+        });
+
+        const licenseData = await licenseRes.json();
+
+        if (!licenseRes.ok) {
+          logger.error(`License API error during auto-provision: ${licenseRes.status} ${JSON.stringify(licenseData)}`);
+          const errorEmbed = new EmbedBuilder()
+            .setTitle('License Creation Failed')
+            .setDescription(`Hey <@${interaction.user.id}>, there was an error creating your license. An admin will assist you shortly.`)
+            .setColor(0xE74C3C)
+            .setTimestamp();
+          await channel.send({ embeds: [errorEmbed], components: [closeRow] });
+
+          if (settings.ticket_admin_role_id) {
+            await channel.send({ content: `<@&${settings.ticket_admin_role_id}>`, allowedMentions: { roles: [settings.ticket_admin_role_id] } });
+          }
+
+          await interaction.editReply({ content: `Your ticket has been created: <#${channel.id}>` });
+          return;
+        }
+
+        // Send license embed
+        const licenseEmbed = new EmbedBuilder()
+          .setTitle('Your License')
+          .setColor(0x2ECC71)
+          .addFields(
+            { name: 'User', value: `<@${interaction.user.id}> (${interaction.user.username})`, inline: true },
+            { name: 'Duration', value: 'Lifetime', inline: true },
+            { name: 'License Key', value: `\`\`\`\n${licenseData.license_key}\n\`\`\`` },
+          )
+          .setTimestamp();
+
+        if (licenseData.expires_at) {
+          licenseEmbed.spliceFields(1, 1, { name: 'Duration', value: `Expires ${new Date(licenseData.expires_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, inline: true });
+        }
+
+        const welcomeEmbed = new EmbedBuilder()
+          .setTitle('License Created')
+          .setDescription(`Hey <@${interaction.user.id}>, your license has been automatically created!\n\n**Make sure to save your license key somewhere safe — this ticket will be closed shortly.**\n\nIf you still need help, press the button below.`)
+          .setColor(0x2ECC71)
+          .setTimestamp();
+
+        const actionRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`need_help_ticket:${channel.id}`)
+            .setLabel('I Need Help')
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(`close_ticket:${channel.id}`)
+            .setLabel('Close Ticket')
+            .setStyle(ButtonStyle.Danger),
+        );
+
+        await channel.send({ embeds: [welcomeEmbed], components: [actionRow] });
+
+        // Send license key and loader as a separate message
+        const channelMsg = { embeds: [licenseEmbed] };
+
+        if (settings.loader_file_name) {
+          const loaderPath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', interaction.guild.id, settings.loader_file_name);
+          if (fs.existsSync(loaderPath)) {
+            channelMsg.files = [new AttachmentBuilder(loaderPath, { name: settings.loader_file_name })];
+          } else {
+            logger.warn(`Loader file not found at ${loaderPath}`);
+          }
+        }
+
+        await channel.send(channelMsg);
+
+        await interaction.editReply({ content: `Your license has been created: <#${channel.id}>` });
+        logger.info(`License auto-provisioned: channel=${channel.name} user=${interaction.user.username}`);
+
+        // Log to ticket log channel if configured
+        if (settings.ticket_log_channel_id) {
+          try {
+            const logChannel = await interaction.guild.channels.fetch(settings.ticket_log_channel_id);
+            if (logChannel) {
+              const logEmbed = new EmbedBuilder()
+                .setTitle('License Auto-Provisioned')
+                .setColor(0x2ECC71)
+                .addFields(
+                  { name: 'User', value: `<@${interaction.user.id}> (${interaction.user.username})`, inline: true },
+                  { name: 'Channel', value: `<#${channel.id}>`, inline: true },
+                )
+                .setTimestamp();
+              await logChannel.send({ embeds: [logEmbed] });
+            }
+          } catch (err) {
+            logger.warn(`Failed to log license provisioning: ${err.message}`);
+          }
+        }
       }
-
-      await interaction.editReply({ content: `Your ticket has been created: <#${channel.id}>` });
-      logger.info(`License ticket created: channel=${channel.name} user=${interaction.user.username}`);
     } catch (err) {
-      logger.error(`Failed to create ticket channel: ${err.message}`);
+      logger.error(`Failed to create license ticket: ${err.message}`);
       await interaction.editReply({ content: `Failed to create ticket: ${err.message}` });
     }
+    return;
+  }
+
+  if (action === 'need_help_ticket') {
+    const channelId = params[0];
+    const settings = getSettings(interaction.guild.id);
+
+    // Notify the user and ping admins
+    await interaction.reply({ content: 'An admin has been notified and will be with you shortly.', flags: MessageFlags.Ephemeral });
+
+    if (settings.ticket_admin_role_id) {
+      await interaction.channel.send({ content: `<@&${settings.ticket_admin_role_id}> — <@${interaction.user.id}> needs help in this ticket.`, allowedMentions: { roles: [settings.ticket_admin_role_id], users: [interaction.user.id] } });
+    } else {
+      await interaction.channel.send({ content: `<@${interaction.user.id}> needs help in this ticket. An admin will assist shortly.` });
+    }
+
+    // Disable the help button so it can't be spammed
+    try {
+      const actionRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`need_help_ticket:${channelId}`)
+          .setLabel('I Need Help')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId(`close_ticket:${channelId}`)
+          .setLabel('Close Ticket')
+          .setStyle(ButtonStyle.Danger),
+      );
+      await interaction.message.edit({ components: [actionRow] });
+    } catch (err) {
+      logger.warn(`Failed to disable help button: ${err.message}`);
+    }
+
     return;
   }
 
