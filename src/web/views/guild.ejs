@@ -868,8 +868,10 @@ Please review the channel list and post in the most appropriate channel moving f
 // Pass guild roles and emojis to JS for self-role panel dropdowns
 window.__guildRoles = <%- JSON.stringify(roles) %>;
 window.__guildEmojis = <%- JSON.stringify(emojis) %>;
-// Load self-role panels
-loadSelfRolePanels('<%= guild.id %>');
+// Load self-role panels after dashboard.js is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  if (typeof loadSelfRolePanels === 'function') loadSelfRolePanels('<%= guild.id %>');
+});
 </script>
 
 <%- footer %>

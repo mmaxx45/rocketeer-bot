@@ -120,7 +120,7 @@ module.exports = function (client) {
 
     const emojis = botGuild.emojis.cache
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map(e => ({ id: e.id, name: e.name, animated: e.animated, identifier: e.animated ? `<a:${e.name}:${e.id}>` : `<:${e.name}:${e.id}>`, url: e.url }));
+      .map(e => ({ id: e.id, name: e.name, animated: e.animated, identifier: e.animated ? `<a:${e.name}:${e.id}>` : `<:${e.name}:${e.id}>`, url: e.imageURL() }));
 
     const guild = { id: botGuild.id, name: botGuild.name, icon: botGuild.iconURL() };
     res.render('guild', {

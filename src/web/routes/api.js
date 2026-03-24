@@ -619,9 +619,6 @@ module.exports = function (client) {
 
   // ========== Self-Role Panels ==========
 
-  const { createPanel, getPanel, getPanels, deletePanel, addRoleOption, removeRoleOption, getRoleOptions } = require('../../database/selfRoles');
-  const { buildPanelEmbed, buildPanelButtons } = require('../../bot/commands/selfroles');
-
   // Get self-role panels with options
   router.get('/guild/:guildId/self-role-panels', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
@@ -655,6 +652,7 @@ module.exports = function (client) {
   router.post('/guild/:guildId/self-role-panels', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { channelId, title, description } = req.body;
+    const { createPanel } = require('../../database/selfRoles');
 
     if (!channelId) return res.status(400).json({ error: 'channelId is required' });
 
@@ -685,6 +683,7 @@ module.exports = function (client) {
   // Delete a panel
   router.delete('/guild/:guildId/self-role-panels/:panelId', ensureGuildAccess, async (req, res) => {
     const { guildId, panelId } = req.params;
+    const { getPanel, deletePanel } = require('../../database/selfRoles');
 
     try {
       const panel = getPanel(panelId);
@@ -711,6 +710,8 @@ module.exports = function (client) {
   router.post('/guild/:guildId/self-role-panels/:panelId/roles', ensureGuildAccess, async (req, res) => {
     const { guildId, panelId } = req.params;
     const { roleId, emoji, label } = req.body;
+    const { getPanel, addRoleOption, getRoleOptions } = require('../../database/selfRoles');
+    const { buildPanelEmbed, buildPanelButtons } = require('../../bot/commands/selfroles');
 
     if (!roleId) return res.status(400).json({ error: 'roleId is required' });
 
@@ -753,6 +754,8 @@ module.exports = function (client) {
   // Remove a role from a panel
   router.delete('/guild/:guildId/self-role-panels/:panelId/roles/:roleId', ensureGuildAccess, async (req, res) => {
     const { guildId, panelId, roleId } = req.params;
+    const { getPanel, removeRoleOption, getRoleOptions } = require('../../database/selfRoles');
+    const { buildPanelEmbed, buildPanelButtons } = require('../../bot/commands/selfroles');
 
     try {
       const panel = getPanel(panelId);
