@@ -614,7 +614,7 @@ module.exports = {
 
             try {
               await message.channel.send({
-                content: `<@${message.author.id}> has been automatically kicked for repeated crossposting (${recentIncidentCount} incidents in ${kickWindowMinutes} minutes).`,
+                content: `<@${message.author.id}> has been auto kicked.`,
               });
             } catch (err) {
               logger.warn(`Failed to send kick notification: ${err.message}`);
