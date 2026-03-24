@@ -17,6 +17,13 @@ module.exports = {
       opt.setName('reason').setDescription('Reason for the ban').setRequired(true)
     )
     .addIntegerOption(opt =>
+      opt.setName('duration')
+        .setDescription('Ban duration in days (leave empty for permanent)')
+        .setMinValue(1)
+        .setMaxValue(365)
+        .setRequired(false)
+    )
+    .addIntegerOption(opt =>
       opt.setName('delete_messages_days')
         .setDescription('Number of days of messages to delete (0-7)')
         .setMinValue(0)
@@ -34,6 +41,7 @@ module.exports = {
 
     const targetUser = interaction.options.getUser('user');
     const reason = interaction.options.getString('reason');
+    const duration = interaction.options.getInteger('duration') || null;
     const deleteMessageDays = interaction.options.getInteger('delete_messages_days') || 0;
 
     if (targetUser.bot) {
@@ -65,6 +73,7 @@ module.exports = {
     const descParts = [];
     descParts.push(`**User:** <@${targetUser.id}> (${targetUser.id})`);
     descParts.push(`**Reason:** ${reason}`);
+    descParts.push(`**Duration:** ${duration ? `${duration} day(s)` : 'Permanent'}`);
     descParts.push(`**Delete messages:** ${deleteMessageDays} day(s)`);
     descParts.push(`**Warnings on record:** ${existingWarnings.length}`);
     if (embed.data.description && embed.data.description !== 'No warnings on record.') {
@@ -77,6 +86,7 @@ module.exports = {
       targetId: targetUser.id,
       moderatorId: interaction.user.id,
       reason,
+      duration,
       deleteMessageDays,
       guildId: interaction.guild.id,
     });

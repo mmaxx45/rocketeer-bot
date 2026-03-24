@@ -12,6 +12,7 @@ const { parseDuration, formatDuration } = require('../utils/parseDuration');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
 const { createTicket, getOpenTicketByUser, getOpenTicketByChannel, closeTicket } = require('../../database/tickets');
 const { getRoleOptions } = require('../../database/selfRoles');
+const { addTempBan } = require('../../database/tempbans');
 
 const DEFAULT_WARN_REASONS = [
   'Spam or flooding',
@@ -309,8 +310,18 @@ async function handleButton(interaction) {
         logger.warn(`Failed to log mod action: ${err.message}`);
       }
 
+      // Record temp ban if duration was specified
+      if (pending.duration) {
+        try {
+          addTempBan(interaction.guild.id, pending.targetId, interaction.user.id, pending.reason, pending.duration);
+        } catch (err) {
+          logger.warn(`Failed to record temp ban: ${err.message}`);
+        }
+      }
+
+      const durationText = pending.duration ? `${pending.duration} day(s)` : 'Permanent';
       await interaction.update({
-        content: `<@${pending.targetId}> has been banned.\n**Reason:** ${pending.reason}`,
+        content: `<@${pending.targetId}> has been banned.\n**Reason:** ${pending.reason}\n**Duration:** ${durationText}`,
         embeds: [],
         components: [],
       });
@@ -318,7 +329,7 @@ async function handleButton(interaction) {
       // Post public message in channel
       try {
         await interaction.channel.send({
-          content: `<@${pending.targetId}> has been banned from the server.`,
+          content: `<@${pending.targetId}> has been banned from the server.` + (pending.duration ? `\n**Duration:** ${durationText}` : ''),
         });
       } catch (err) {
         logger.warn(`Failed to send public ban notification: ${err.message}`);
@@ -331,16 +342,22 @@ async function handleButton(interaction) {
           const logChannel = await interaction.guild.channels.fetch(settings.ban_log_channel_id);
           if (logChannel) {
             const warnings = getWarnings(interaction.guild.id, pending.targetId);
+            const logFields = [
+              { name: 'User', value: `<@${pending.targetId}> (${pending.targetId})`, inline: true },
+              { name: 'Banned by', value: `<@${interaction.user.id}>`, inline: true },
+              { name: 'Total Warnings', value: `${warnings.length}`, inline: true },
+              { name: 'Reason', value: pending.reason },
+              { name: 'Duration', value: durationText, inline: true },
+              { name: 'Messages Deleted', value: `${pending.deleteMessageDays || 0} day(s)`, inline: true },
+            ];
+            if (pending.duration) {
+              const expiresAt = new Date(Date.now() + pending.duration * 24 * 60 * 60 * 1000);
+              logFields.push({ name: 'Expires', value: `<t:${Math.floor(expiresAt.getTime() / 1000)}:F>`, inline: true });
+            }
             const logEmbed = new EmbedBuilder()
-              .setTitle('User Banned')
-              .setColor(0xFF0000)
-              .addFields(
-                { name: 'User', value: `<@${pending.targetId}> (${pending.targetId})`, inline: true },
-                { name: 'Banned by', value: `<@${interaction.user.id}>`, inline: true },
-                { name: 'Total Warnings', value: `${warnings.length}`, inline: true },
-                { name: 'Reason', value: pending.reason },
-                { name: 'Messages Deleted', value: `${pending.deleteMessageDays || 0} day(s)`, inline: true },
-              )
+              .setTitle(pending.duration ? 'User Temporarily Banned' : 'User Banned')
+              .setColor(pending.duration ? 0xFF8C00 : 0xFF0000)
+              .addFields(...logFields)
               .setTimestamp();
             await logChannel.send({ embeds: [logEmbed] });
           }

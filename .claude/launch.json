@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rocketeerbot-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["node_modules/nodemon/bin/nodemon.js", "src/index.js"],
+      "port": 3000
+    }
+  ]
+}

@@ -299,6 +299,26 @@ function runMigrations() {
     db.pragma('user_version = 18');
   }
 
+  if (version < 19) {
+    logger.info('Running database migration v19: temp_bans table');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS temp_bans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        moderator_id TEXT NOT NULL,
+        reason TEXT,
+        duration_days INTEGER NOT NULL,
+        banned_at TEXT DEFAULT (datetime('now')),
+        unban_at TEXT NOT NULL,
+        unbanned INTEGER DEFAULT 0
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_temp_bans_due ON temp_bans(guild_id, unbanned, unban_at);
+    `);
+    db.pragma('user_version = 19');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 
