@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 const path = require('path');
 const fs = require('fs');
 const logger = require('../../logger');
@@ -45,6 +45,42 @@ function checkCooldown(userId, action) {
     }
   }
   return true;
+}
+
+async function sendBanDM(client, guild, targetId, reason, duration, settings) {
+  try {
+    const targetUser = await client.users.fetch(targetId);
+    const dmEmbed = new EmbedBuilder()
+      .setTitle('You have been banned')
+      .setColor(0xFF0000)
+      .setDescription(`You have been banned from **${guild.name}**.`)
+      .addFields(
+        { name: 'Reason', value: reason || 'No reason provided' },
+        { name: 'Expires', value: duration || 'Never' },
+      )
+      .setTimestamp();
+
+    const dmComponents = [];
+    if (settings.appeal_enabled && settings.appeal_category_id) {
+      dmComponents.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`ban_appeal:${guild.id}`)
+          .setLabel('Appeal Ban')
+          .setStyle(ButtonStyle.Primary),
+      ));
+    }
+
+    if (settings.server_invite_code) {
+      dmEmbed.addFields({
+        name: 'Rejoin After Ban',
+        value: `If your ban is lifted, you can rejoin using: https://discord.gg/${settings.server_invite_code}`,
+      });
+    }
+
+    await targetUser.send({ embeds: [dmEmbed], components: dmComponents });
+  } catch (err) {
+    logger.warn(`Failed to DM banned user: ${err.message}`);
+  }
 }
 
 async function handleButton(interaction) {
@@ -102,32 +138,7 @@ async function handleButton(interaction) {
 
     try {
       // DM the banned user BEFORE banning (after ban, bot and user share no guilds)
-      try {
-        const targetUser = await interaction.client.users.fetch(pending.targetId);
-        const dmEmbed = new EmbedBuilder()
-          .setTitle('You have been banned')
-          .setColor(0xFF0000)
-          .setDescription(`You have been banned from **${interaction.guild.name}**.`)
-          .addFields(
-            { name: 'Reason', value: pending.reason || 'No reason provided' },
-            { name: 'Expires', value: 'Never' },
-          )
-          .setTimestamp();
-
-        const dmComponents = [];
-        if (settings.appeal_enabled && settings.appeal_category_id) {
-          dmComponents.push(new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`ban_appeal:${interaction.guild.id}`)
-              .setLabel('Appeal Ban')
-              .setStyle(ButtonStyle.Primary),
-          ));
-        }
-
-        await targetUser.send({ embeds: [dmEmbed], components: dmComponents });
-      } catch (err) {
-        logger.warn(`Failed to DM banned user: ${err.message}`);
-      }
+      await sendBanDM(interaction.client, interaction.guild, pending.targetId, pending.reason, null, settings);
 
       try {
         const member = await interaction.guild.members.fetch(pending.targetId);
@@ -319,39 +330,7 @@ async function handleButton(interaction) {
 
     try {
       // DM the banned user BEFORE banning (after ban, bot and user share no guilds)
-      try {
-        const targetUser = await interaction.client.users.fetch(pending.targetId);
-        const dmEmbed = new EmbedBuilder()
-          .setTitle('You have been banned')
-          .setColor(0xFF0000)
-          .setDescription(`You have been banned from **${interaction.guild.name}**.`)
-          .addFields(
-            { name: 'Reason', value: pending.reason || 'No reason provided' },
-            { name: 'Expires', value: 'Never' },
-          )
-          .setTimestamp();
-
-        const dmComponents = [];
-        if (banSettings.appeal_enabled && banSettings.appeal_category_id) {
-          dmComponents.push(new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`ban_appeal:${interaction.guild.id}`)
-              .setLabel('Appeal Ban')
-              .setStyle(ButtonStyle.Primary),
-          ));
-        }
-
-        if (banSettings.server_invite_code) {
-          dmEmbed.addFields({
-            name: 'Rejoin After Ban',
-            value: `If your ban is lifted, you can rejoin using: https://discord.gg/${banSettings.server_invite_code}`,
-          });
-        }
-
-        await targetUser.send({ embeds: [dmEmbed], components: dmComponents });
-      } catch (err) {
-        logger.warn(`Failed to DM banned user: ${err.message}`);
-      }
+      await sendBanDM(interaction.client, interaction.guild, pending.targetId, pending.reason, null, banSettings);
 
       const deleteMessageSeconds = (pending.deleteMessageDays || 0) * 86400;
       try {
@@ -585,17 +564,17 @@ async function handleButton(interaction) {
         hasExistingLicense = !!list.find(l => l.status === 'active' || l.status === 'suspended');
       }
 
-      const { ChannelType, PermissionFlagsBits: Perms } = require('discord.js');
+
 
       // Build permission overwrites
       const overwrites = [
-        { id: interaction.guild.roles.everyone.id, deny: [Perms.ViewChannel] },
-        { id: interaction.user.id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ReadMessageHistory] },
-        { id: interaction.client.user.id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ManageChannels] },
+        { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+        { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] },
       ];
 
       if (settings.ticket_admin_role_id) {
-        overwrites.push({ id: settings.ticket_admin_role_id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ReadMessageHistory] });
+        overwrites.push({ id: settings.ticket_admin_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       }
 
       const channel = await interaction.guild.channels.create({
@@ -951,16 +930,16 @@ async function handleButton(interaction) {
       }
 
       // Create a private ticket channel
-      const { ChannelType, PermissionFlagsBits: Perms } = require('discord.js');
+
 
       const overwrites = [
-        { id: interaction.guild.roles.everyone.id, deny: [Perms.ViewChannel] },
-        { id: interaction.user.id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ReadMessageHistory] },
-        { id: interaction.client.user.id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ManageChannels] },
+        { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+        { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] },
       ];
 
       if (settings.ticket_admin_role_id) {
-        overwrites.push({ id: settings.ticket_admin_role_id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ReadMessageHistory] });
+        overwrites.push({ id: settings.ticket_admin_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       }
 
       const channel = await interaction.guild.channels.create({
@@ -1226,16 +1205,16 @@ async function handleButton(interaction) {
         // Could not fetch ban info
       }
 
-      const { ChannelType, PermissionFlagsBits: Perms } = require('discord.js');
+
 
       // Build permission overwrites for the appeal channel
       const overwrites = [
-        { id: guild.roles.everyone.id, deny: [Perms.ViewChannel] },
-        { id: interaction.client.user.id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ManageChannels, Perms.ManageMessages] },
+        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageMessages] },
       ];
 
       if (appealSettings.moderator_role_id) {
-        overwrites.push({ id: appealSettings.moderator_role_id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ReadMessageHistory] });
+        overwrites.push({ id: appealSettings.moderator_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       }
 
       const channel = await guild.channels.create({
