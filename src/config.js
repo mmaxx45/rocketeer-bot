@@ -22,10 +22,6 @@ module.exports = {
     port: parseInt(process.env.PORT, 10) || 3000,
     sessionSecret: process.env.SESSION_SECRET,
   },
-  licensing: {
-    apiUrl: process.env.LICENSING_API_URL || null,
-    apiKey: process.env.LICENSING_API_KEY || null,
-  },
   defaults: {
     crosspostThreshold: 80,
     crosspostWindowHours: 48,

@@ -18,9 +18,6 @@
     <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
       <i class="bi bi-exclamation-triangle"></i> View Warnings
     </a>
-    <a href="/dashboard/guild/<%= guild.id %>/licenses" class="btn btn-outline-success">
-      <i class="bi bi-key"></i> License Stats
-    </a>
     <a href="/dashboard/guild/<%= guild.id %>/stats" class="btn btn-outline-info">
       <i class="bi bi-bar-chart-line"></i> Stats
     </a>
@@ -66,9 +63,6 @@
       </a>
       <a class="sidebar-nav-item" href="#section-messages" data-section="section-messages">
         <i class="bi bi-chat-quote"></i> Custom Messages
-      </a>
-      <a class="sidebar-nav-item" href="#section-tickets" data-section="section-tickets">
-        <i class="bi bi-ticket-perforated"></i> Licensing / Tickets
       </a>
       <a class="sidebar-nav-item" href="#section-bot" data-section="section-bot">
         <i class="bi bi-robot"></i> Bot
@@ -662,137 +656,6 @@ Please review the channel list and post in the most appropriate channel moving f
                 <textarea name="warn_public_message" class="form-control" rows="3"
                           placeholder="{user}, you have received an official warning."><%= settings.warn_public_message || '' %></textarea>
                 <a href="#" class="small mt-1 d-inline-block reset-default" data-target="warn_public_message">Reset to default</a>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Licensing / Tickets Section -->
-      <div class="settings-section" id="section-tickets">
-        <div class="section-header">
-          <i class="bi bi-ticket-perforated"></i>
-          <h5>Licensing / Tickets</h5>
-        </div>
-        <div class="section-body">
-          <span class="setting-hint mb-3 d-block">Configure the ticket system for license provisioning. Use <code>/setup-license-panel</code> in a channel to post the purchase button.</span>
-          <div class="row">
-            <div class="col-md-6">
-              <div class="setting-item">
-                <label class="setting-label"><i class="bi bi-folder"></i> Ticket Category</label>
-                <span class="setting-hint">Category where ticket channels will be created.</span>
-                <select name="ticket_category_id" class="form-select">
-                  <option value="">-- Not set --</option>
-                  <% categories.forEach(cat => { %>
-                    <option value="<%= cat.id %>" <%= settings.ticket_category_id === cat.id ? 'selected' : '' %>>
-                      <%= cat.name %>
-                    </option>
-                  <% }); %>
-                </select>
-              </div>
-            </div>
-            <div class="col-md-6">
-              <div class="setting-item">
-                <label class="setting-label"><i class="bi bi-shield-lock"></i> Ticket Admin Role</label>
-                <span class="setting-hint">Members with this role can see all tickets, create licenses, and close tickets.</span>
-                <select name="ticket_admin_role_id" class="form-select">
-                  <option value="">-- Not set (admins only) --</option>
-                  <% roles.forEach(role => { %>
-                    <option value="<%= role.id %>" <%= settings.ticket_admin_role_id === role.id ? 'selected' : '' %>>
-                      <%= role.name %>
-                    </option>
-                  <% }); %>
-                </select>
-              </div>
-            </div>
-            <div class="col-md-6">
-              <div class="setting-item">
-                <label class="setting-label"><i class="bi bi-journal-text"></i> Ticket Log Channel</label>
-                <span class="setting-hint">Channel where ticket transcripts are logged when tickets are closed.</span>
-                <select name="ticket_log_channel_id" class="form-select">
-                  <option value="">-- Disabled --</option>
-                  <% channels.forEach(ch => { %>
-                    <option value="<%= ch.id %>" <%= settings.ticket_log_channel_id === ch.id ? 'selected' : '' %>>
-                      #<%= ch.name %>
-                    </option>
-                  <% }); %>
-                </select>
-              </div>
-            </div>
-            <div class="col-12">
-              <div class="setting-item">
-                <label class="setting-label"><i class="bi bi-person-badge"></i> License Required Roles</label>
-                <span class="setting-hint">Users must have <strong>at least one</strong> of these roles to keep their license. If a user loses all of these roles (e.g. Patreon), their license is automatically revoked.</span>
-                <div class="d-flex flex-column gap-2 mb-3" id="license-required-roles-list">
-                  <% licenseRequiredRoles.forEach(roleId => { %>
-                    <% const role = roles.find(r => r.id === roleId); %>
-                    <% const price = licenseRolePrices[roleId]; %>
-                    <div class="d-flex align-items-center gap-2 license-role-badge" data-role-id="<%= roleId %>">
-                      <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 px-2">
-                        <%= role ? role.name : roleId %>
-                      </span>
-                      <div class="input-group input-group-sm" style="width: 140px;">
-                        <span class="input-group-text" style="font-size: 0.8rem;">$</span>
-                        <input type="number" class="form-control" step="0.01" min="0" placeholder="Price"
-                               value="<%= price != null ? price : '' %>"
-                               onchange="setRolePrice('<%= guild.id %>', '<%= roleId %>', this.value)">
-                      </div>
-                      <button type="button" class="btn-close btn-close-white" style="font-size: 0.5rem;"
-                              onclick="removeLicenseRequiredRole('<%= guild.id %>', '<%= roleId %>', this)"></button>
-                    </div>
-                  <% }); %>
-                </div>
-                <div class="input-group">
-                  <select id="add-license-required-role" class="form-select">
-                    <option value="">-- Select role --</option>
-                    <% roles.forEach(role => { %>
-                      <% if (!licenseRequiredRoles.includes(role.id)) { %>
-                        <option value="<%= role.id %>"><%= role.name %></option>
-                      <% } %>
-                    <% }); %>
-                  </select>
-                  <div class="input-group-text" style="font-size: 0.8rem; padding: 0;">
-                    <span class="input-group-text border-0" style="font-size: 0.8rem;">$</span>
-                    <input type="number" class="form-control border-0" id="add-license-role-price" step="0.01" min="0"
-                           placeholder="Price" style="width: 80px; font-size: 0.85rem;">
-                  </div>
-                  <button type="button" class="btn btn-outline-primary"
-                          onclick="addLicenseRequiredRole('<%= guild.id %>')">
-                    <i class="bi bi-plus-lg"></i> Add
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div class="col-12">
-              <div class="setting-item">
-                <label class="setting-label"><i class="bi bi-chat-left-text"></i> Ticket Opened Message</label>
-                <span class="setting-hint">Message shown when a ticket is opened. Use <code>{user}</code> to mention the user. Leave blank for default.</span>
-                <textarea name="ticket_open_message" class="form-control" rows="3"
-                          placeholder="Hey {user}, thanks for your interest! An admin will be with you shortly.&#10;&#10;Please describe what you need and we'll get you sorted."><%= settings.ticket_open_message || '' %></textarea>
-              </div>
-            </div>
-            <div class="col-md-6">
-              <div class="setting-item">
-                <label class="setting-label"><i class="bi bi-download"></i> Loader File</label>
-                <span class="setting-hint">Upload a loader file that will be sent to the customer when a license is provisioned via <code>/create-license</code>.</span>
-                <div id="loader-current" class="mb-2">
-                  <% if (settings.loader_file_name) { %>
-                    <span class="badge bg-success d-inline-flex align-items-center gap-1 py-2 px-3">
-                      <i class="bi bi-file-earmark-check"></i>
-                      <span id="loader-file-name"><%= settings.loader_file_name %></span>
-                      <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.5rem;"
-                              onclick="deleteLoader('<%= guild.id %>')"></button>
-                    </span>
-                  <% } else { %>
-                    <span class="badge bg-secondary py-2 px-3"><i class="bi bi-x-circle"></i> No loader uploaded</span>
-                  <% } %>
-                </div>
-                <div class="input-group">
-                  <input type="file" class="form-control" id="loader-file-input">
-                  <button type="button" class="btn btn-outline-primary" onclick="uploadLoader('<%= guild.id %>')">
-                    <i class="bi bi-upload"></i> Upload
-                  </button>
-                </div>
               </div>
             </div>
           </div>

@@ -31,13 +31,6 @@ function getStmts() {
         banreason_role_id: db.prepare(`UPDATE guild_settings SET banreason_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         custom_warn_reasons: db.prepare(`UPDATE guild_settings SET custom_warn_reasons = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         bot_status_message: db.prepare(`UPDATE guild_settings SET bot_status_message = ?, updated_at = datetime('now') WHERE guild_id = ?`),
-        ticket_category_id: db.prepare(`UPDATE guild_settings SET ticket_category_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
-        ticket_admin_role_id: db.prepare(`UPDATE guild_settings SET ticket_admin_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
-        ticket_log_channel_id: db.prepare(`UPDATE guild_settings SET ticket_log_channel_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
-        loader_file_name: db.prepare(`UPDATE guild_settings SET loader_file_name = ?, updated_at = datetime('now') WHERE guild_id = ?`),
-        ticket_open_message: db.prepare(`UPDATE guild_settings SET ticket_open_message = ?, updated_at = datetime('now') WHERE guild_id = ?`),
-        license_required_role_ids: db.prepare(`UPDATE guild_settings SET license_required_role_ids = ?, updated_at = datetime('now') WHERE guild_id = ?`),
-        license_role_prices: db.prepare(`UPDATE guild_settings SET license_role_prices = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         banned_domains: db.prepare(`UPDATE guild_settings SET banned_domains = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         filter_enabled: db.prepare(`UPDATE guild_settings SET filter_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         soft_slur_threshold: db.prepare(`UPDATE guild_settings SET soft_slur_threshold = ?, updated_at = datetime('now') WHERE guild_id = ?`),
@@ -89,51 +82,6 @@ function removeExemptChannel(guildId, channelId) {
   const filtered = channels.filter(id => id !== channelId);
   updateSetting(guildId, 'exempt_channels', JSON.stringify(filtered));
   return filtered;
-}
-
-function getLicenseRequiredRoles(guildId) {
-  const settings = getSettings(guildId);
-  try {
-    return JSON.parse(settings.license_required_role_ids || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function addLicenseRequiredRole(guildId, roleId) {
-  const roles = getLicenseRequiredRoles(guildId);
-  if (!roles.includes(roleId)) {
-    roles.push(roleId);
-    updateSetting(guildId, 'license_required_role_ids', JSON.stringify(roles));
-  }
-  return roles;
-}
-
-function removeLicenseRequiredRole(guildId, roleId) {
-  const roles = getLicenseRequiredRoles(guildId);
-  const filtered = roles.filter(id => id !== roleId);
-  updateSetting(guildId, 'license_required_role_ids', JSON.stringify(filtered));
-  return filtered;
-}
-
-function getLicenseRolePrices(guildId) {
-  const settings = getSettings(guildId);
-  try {
-    return JSON.parse(settings.license_role_prices || '{}');
-  } catch {
-    return {};
-  }
-}
-
-function setLicenseRolePrice(guildId, roleId, price) {
-  const prices = getLicenseRolePrices(guildId);
-  if (price === null || price === undefined || price === '') {
-    delete prices[roleId];
-  } else {
-    prices[roleId] = parseFloat(price);
-  }
-  updateSetting(guildId, 'license_role_prices', JSON.stringify(prices));
-  return prices;
 }
 
 function getBannedDomains(guildId) {
@@ -188,17 +136,13 @@ function removeImageOnlyChannel(guildId, channelId) {
   return filtered;
 }
 
+
 module.exports = {
   getSettings,
   updateSetting,
   getExemptChannels,
   addExemptChannel,
   removeExemptChannel,
-  getLicenseRequiredRoles,
-  addLicenseRequiredRole,
-  removeLicenseRequiredRole,
-  getLicenseRolePrices,
-  setLicenseRolePrice,
   getBannedDomains,
   addBannedDomain,
   removeBannedDomain,

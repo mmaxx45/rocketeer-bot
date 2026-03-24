@@ -1,36 +1,11 @@
 const express = require('express');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const { ActivityType } = require('discord.js');
-const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, addLicenseRequiredRole, removeLicenseRequiredRole, setLicenseRolePrice, getBannedDomains, addBannedDomain, removeBannedDomain, getImageOnlyChannels, addImageOnlyChannel, removeImageOnlyChannel } = require('../../database/settings');
+const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, getBannedDomains, addBannedDomain, removeBannedDomain, getImageOnlyChannels, addImageOnlyChannel, removeImageOnlyChannel } = require('../../database/settings');
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const logger = require('../../logger');
 const { userCanManageGuild } = require('../middleware/auth');
 const { addFilterWord, removeFilterWord, getFilterWords } = require('../../database/wordFilter');
-
-// Multer config for loader uploads — store per guild
-const loaderStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', '..', '..', 'data', 'loaders', req.params.guildId);
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    // Sanitize: keep only the original filename (no path traversal)
-    const safeName = path.basename(file.originalname);
-    cb(null, safeName);
-  },
-});
-
-const loaderUpload = multer({
-  storage: loaderStorage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB (Nitro limit)
-  fileFilter: (req, file, cb) => {
-    cb(null, true);
-  },
-});
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) return next();
@@ -51,7 +26,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id, ticket_open_message, license_role_prices, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -164,23 +139,6 @@ module.exports = function (client) {
         }
       }
 
-      if (ticket_category_id !== undefined) {
-        updateSetting(guildId, 'ticket_category_id', ticket_category_id || null);
-      }
-      if (ticket_admin_role_id !== undefined) {
-        updateSetting(guildId, 'ticket_admin_role_id', ticket_admin_role_id || null);
-      }
-      if (ticket_log_channel_id !== undefined) {
-        updateSetting(guildId, 'ticket_log_channel_id', ticket_log_channel_id || null);
-      }
-      if (ticket_open_message !== undefined) {
-        updateSetting(guildId, 'ticket_open_message', ticket_open_message.trim() || null);
-      }
-      if (license_role_prices !== undefined) {
-        // Accepts JSON string or object
-        const pricesStr = typeof license_role_prices === 'string' ? license_role_prices : JSON.stringify(license_role_prices);
-        updateSetting(guildId, 'license_role_prices', pricesStr || null);
-      }
       if (banned_domains !== undefined) {
         const raw = banned_domains.trim();
         if (!raw) {
@@ -224,6 +182,7 @@ module.exports = function (client) {
         }
         updateSetting(guildId, 'server_invite_code', code || null);
       }
+
 
       const settings = getSettings(guildId);
       res.json({ success: true, settings });
@@ -275,40 +234,6 @@ module.exports = function (client) {
     }
   });
 
-  // Update license required roles
-  router.post('/guild/:guildId/license-required-roles', ensureGuildAccess, (req, res) => {
-    const { guildId } = req.params;
-    const { roleId, action } = req.body;
-
-    try {
-      let roles;
-      if (action === 'add') {
-        roles = addLicenseRequiredRole(guildId, roleId);
-      } else if (action === 'remove') {
-        roles = removeLicenseRequiredRole(guildId, roleId);
-      } else {
-        return res.status(400).json({ error: 'Invalid action' });
-      }
-      res.json({ success: true, roles });
-    } catch (err) {
-      logger.error('Failed to update license required roles:', err);
-      res.status(500).json({ error: 'Failed to update license required roles' });
-    }
-  });
-
-  // Update license role price
-  router.post('/guild/:guildId/license-role-price', ensureGuildAccess, (req, res) => {
-    const { guildId } = req.params;
-    const { roleId, price } = req.body;
-
-    try {
-      const prices = setLicenseRolePrice(guildId, roleId, price);
-      res.json({ success: true, prices });
-    } catch (err) {
-      logger.error('Failed to update license role price:', err);
-      res.status(500).json({ error: 'Failed to update license role price' });
-    }
-  });
 
   // Get warnings
   router.get('/guild/:guildId/warnings', ensureGuildAccess, (req, res) => {
@@ -545,60 +470,6 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to fetch incidents:', err);
       res.status(500).json({ error: 'Failed to fetch incidents' });
-    }
-  });
-
-  // Upload loader file
-  router.post('/guild/:guildId/loader', ensureGuildAccess, (req, res) => {
-    loaderUpload.single('loader')(req, res, (err) => {
-      if (err) {
-        logger.error('Loader upload error:', err);
-        const msg = err.code === 'LIMIT_FILE_SIZE' ? 'File too large (max 100 MB)' : err.message;
-        return res.status(400).json({ error: msg });
-      }
-
-      const { guildId } = req.params;
-      if (!req.file) {
-        return res.status(400).json({ error: 'No file uploaded' });
-      }
-
-      try {
-        // Remove any previous loader file
-        const settings = getSettings(guildId);
-        if (settings.loader_file_name) {
-          const oldPath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', guildId, settings.loader_file_name);
-          if (fs.existsSync(oldPath)) {
-            fs.unlinkSync(oldPath);
-          }
-        }
-
-        updateSetting(guildId, 'loader_file_name', req.file.filename);
-        logger.info(`Loader uploaded for guild ${guildId}: ${req.file.filename}`);
-        res.json({ success: true, fileName: req.file.filename });
-      } catch (err) {
-        logger.error('Failed to save loader file:', err);
-        res.status(500).json({ error: 'Failed to save loader file' });
-      }
-    });
-  });
-
-  // Delete loader file
-  router.delete('/guild/:guildId/loader', ensureGuildAccess, (req, res) => {
-    const { guildId } = req.params;
-
-    try {
-      const settings = getSettings(guildId);
-      if (settings.loader_file_name) {
-        const filePath = path.join(__dirname, '..', '..', '..', 'data', 'loaders', guildId, settings.loader_file_name);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-        updateSetting(guildId, 'loader_file_name', null);
-      }
-      res.json({ success: true });
-    } catch (err) {
-      logger.error('Failed to delete loader file:', err);
-      res.status(500).json({ error: 'Failed to delete loader file' });
     }
   });
 
