@@ -36,15 +36,23 @@ function buildPanelButtons(panelId, roleOptions, guild) {
 
     const button = new ButtonBuilder()
       .setCustomId(`selfrole:${panelId}:${option.role_id}`)
-      .setLabel(label.slice(0, 80))
       .setStyle(ButtonStyle.Secondary);
 
     if (option.emoji) {
       try {
         button.setEmoji(option.emoji);
+        // Only set label if a custom label was explicitly provided (not the role name fallback)
+        if (option.label) {
+          button.setLabel(option.label.slice(0, 80));
+        }
+        // If no custom label, emoji-only button
       } catch {
-        // Invalid emoji, skip it
+        // Invalid emoji, fall back to label
+        button.setLabel(label.slice(0, 80));
       }
+    } else {
+      // No emoji, must have a label
+      button.setLabel(label.slice(0, 80));
     }
 
     currentRow.addComponents(button);
