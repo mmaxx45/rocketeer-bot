@@ -381,6 +381,82 @@ module.exports = function (client) {
     }
   });
 
+  // Warnings detail breakdown
+  router.get('/guild/:guildId/stats/warnings-detail', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    try {
+      const byType = db.prepare(`
+        SELECT type, COUNT(*) as count FROM warnings WHERE guild_id = ? GROUP BY type
+      `).all(guildId);
+      const byMonth = db.prepare(`
+        SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count
+        FROM warnings WHERE guild_id = ?
+        GROUP BY month ORDER BY month DESC LIMIT 12
+      `).all(guildId);
+      const recent = db.prepare(`
+        SELECT * FROM warnings WHERE guild_id = ? ORDER BY created_at DESC LIMIT 20
+      `).all(guildId);
+      res.json({ byType, byMonth, recent });
+    } catch (err) {
+      logger.error('Failed to fetch warnings detail:', err);
+      res.status(500).json({ error: 'Failed to fetch warnings detail' });
+    }
+  });
+
+  // Bans detail list
+  router.get('/guild/:guildId/stats/bans', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    try {
+      const bans = db.prepare(`
+        SELECT * FROM mod_actions
+        WHERE guild_id = ? AND action_type = 'ban'
+        ORDER BY created_at DESC LIMIT 50
+      `).all(guildId);
+      res.json({ bans });
+    } catch (err) {
+      logger.error('Failed to fetch bans detail:', err);
+      res.status(500).json({ error: 'Failed to fetch bans detail' });
+    }
+  });
+
+  // Crosspost incidents detail
+  router.get('/guild/:guildId/stats/crosspost-detail', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    try {
+      const byAction = db.prepare(`
+        SELECT action_taken, COUNT(*) as count FROM crosspost_incidents
+        WHERE guild_id = ? GROUP BY action_taken
+      `).all(guildId);
+      const topOffenders = db.prepare(`
+        SELECT user_id, COUNT(*) as count FROM crosspost_incidents
+        WHERE guild_id = ? GROUP BY user_id ORDER BY count DESC LIMIT 10
+      `).all(guildId);
+      const recent = db.prepare(`
+        SELECT * FROM crosspost_incidents WHERE guild_id = ? ORDER BY created_at DESC LIMIT 20
+      `).all(guildId);
+      res.json({ byAction, topOffenders, recent });
+    } catch (err) {
+      logger.error('Failed to fetch crosspost detail:', err);
+      res.status(500).json({ error: 'Failed to fetch crosspost detail' });
+    }
+  });
+
+  // Active moderators detail
+  router.get('/guild/:guildId/stats/mods-detail', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    try {
+      const mods = db.prepare(`
+        SELECT moderator_id, action_type, COUNT(*) as count
+        FROM mod_actions WHERE guild_id = ? AND created_at >= datetime('now', '-30 days')
+        GROUP BY moderator_id, action_type ORDER BY count DESC
+      `).all(guildId);
+      res.json({ mods });
+    } catch (err) {
+      logger.error('Failed to fetch mods detail:', err);
+      res.status(500).json({ error: 'Failed to fetch mods detail' });
+    }
+  });
+
   // Get warnings over time (for chart)
   router.get('/guild/:guildId/warnings-over-time', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;

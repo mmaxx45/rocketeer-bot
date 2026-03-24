@@ -937,6 +937,230 @@ textarea.form-control {
   letter-spacing: 0.03em;
 }
 
+/* ===== Clickable Stat Cards ===== */
+.stat-card-clickable {
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+
+.stat-card-clickable:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
+}
+
+/* ===== Detail Modal ===== */
+.detail-modal-content {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  color: var(--text-primary);
+}
+
+.detail-modal-header {
+  border-bottom: 1px solid var(--border-primary);
+  padding: 1rem 1.25rem;
+}
+
+.detail-modal-header .modal-title {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.detail-modal-body {
+  padding: 1.25rem;
+}
+
+.detail-section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 1.25rem 0 0.75rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.detail-section-title:first-child {
+  margin-top: 0;
+}
+
+.detail-section-title i {
+  color: var(--accent-blurple);
+  font-size: 0.9rem;
+}
+
+/* Detail badges */
+.detail-badge-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.detail-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.detail-badge-yellow {
+  background: var(--accent-yellow-dim);
+  color: var(--accent-yellow);
+}
+
+.detail-badge-cyan {
+  background: var(--accent-cyan-dim);
+  color: var(--accent-cyan);
+}
+
+.detail-badge-red {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+}
+
+.detail-badge-green {
+  background: var(--accent-green-dim);
+  color: var(--accent-green);
+}
+
+/* Detail bar charts */
+.detail-bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.detail-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.detail-bar-rank {
+  width: 1.5rem;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.detail-bar-label {
+  min-width: 100px;
+  max-width: 160px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.detail-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.detail-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width var(--transition-med);
+}
+
+.detail-fill-yellow {
+  background: var(--accent-yellow);
+}
+
+.detail-fill-red {
+  background: var(--accent-red);
+}
+
+.detail-fill-cyan {
+  background: var(--accent-cyan);
+}
+
+.detail-bar-value {
+  min-width: 2rem;
+  text-align: right;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+/* Detail table */
+.detail-table {
+  font-size: 0.85rem;
+}
+
+.detail-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border-bottom-color: var(--border-primary);
+}
+
+.detail-table td {
+  vertical-align: middle;
+  border-bottom-color: var(--border-primary);
+}
+
+.detail-reason-cell {
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+
+.detail-date-cell {
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+/* Detail type badges */
+.detail-type-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.detail-type-manual {
+  background: var(--accent-yellow-dim);
+  color: var(--accent-yellow);
+}
+
+.detail-type-crosspost {
+  background: var(--accent-cyan-dim);
+  color: var(--accent-cyan);
+}
+
+.detail-type-deleted {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+}
+
+.detail-type-warned {
+  background: var(--accent-yellow-dim);
+  color: var(--accent-yellow);
+}
+
+.detail-type-other {
+  background: var(--accent-blurple-glow);
+  color: var(--accent-blurple);
+}
+
 /* ===== Warnings Empty State ===== */
 .warnings-empty {
   text-align: center;

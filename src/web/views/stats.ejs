@@ -33,19 +33,19 @@
 
 <!-- Overview Cards -->
 <div class="warnings-stats mb-4">
-  <div class="stat-card">
+  <div class="stat-card stat-card-clickable" onclick="showDetail('warnings')">
     <div class="stat-value"><%= stats.totalWarnings %></div>
     <div class="stat-label">Total Warnings</div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card stat-card-clickable" onclick="showDetail('bans')">
     <div class="stat-value"><%= stats.totalBans %></div>
     <div class="stat-label">Total Bans</div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card stat-card-clickable" onclick="showDetail('crosspost')">
     <div class="stat-value"><%= stats.totalCrosspostIncidents %></div>
     <div class="stat-label">Crosspost Incidents</div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card stat-card-clickable" onclick="showDetail('mods')">
     <div class="stat-value"><%= stats.activeMods %></div>
     <div class="stat-label">Active Moderators</div>
   </div>
@@ -341,6 +341,269 @@
 
   // Initial load
   loadChart('8w');
+})();
+</script>
+
+<!-- Detail Modal -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-labelledby="detailModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content detail-modal-content">
+      <div class="modal-header detail-modal-header">
+        <h5 class="modal-title" id="detailModalTitle">Details</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body detail-modal-body" id="detailModalBody">
+        <div class="text-center py-4">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const guildId = '<%= guild.id %>';
+  const userMap = <%- JSON.stringify(userMap) %>;
+  const botId = '<%= botId %>';
+  let detailModal = null;
+
+  function getModal() {
+    if (!detailModal) {
+      detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
+    }
+    return detailModal;
+  }
+
+  function resolveUser(id) {
+    if (id === botId) return '<i class="bi bi-robot"></i> Rocketeer';
+    if (userMap[id]) return '@' + escapeHtml(userMap[id]);
+    return '<span class="text-muted">' + escapeHtml(id) + '</span>';
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '--';
+    const d = new Date(dateStr + (dateStr.endsWith('Z') ? '' : 'Z'));
+    return d.toLocaleString();
+  }
+
+  function setModalContent(title, html) {
+    document.getElementById('detailModalTitle').textContent = title;
+    document.getElementById('detailModalBody').innerHTML = html;
+  }
+
+  function setModalLoading(title) {
+    document.getElementById('detailModalTitle').textContent = title;
+    document.getElementById('detailModalBody').innerHTML =
+      '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+  }
+
+  window.showDetail = async function (type) {
+    const modal = getModal();
+    const titles = {
+      warnings: 'Warnings Breakdown',
+      bans: 'Ban History',
+      crosspost: 'Crosspost Incidents',
+      mods: 'Active Moderators (Last 30 Days)',
+    };
+    setModalLoading(titles[type] || 'Details');
+    modal.show();
+
+    try {
+      const endpoints = {
+        warnings: `/api/guild/${guildId}/stats/warnings-detail`,
+        bans: `/api/guild/${guildId}/stats/bans`,
+        crosspost: `/api/guild/${guildId}/stats/crosspost-detail`,
+        mods: `/api/guild/${guildId}/stats/mods-detail`,
+      };
+      const res = await fetch(endpoints[type]);
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+
+      let html = '';
+      if (type === 'warnings') html = renderWarningsDetail(data);
+      else if (type === 'bans') html = renderBansDetail(data);
+      else if (type === 'crosspost') html = renderCrosspostDetail(data);
+      else if (type === 'mods') html = renderModsDetail(data);
+
+      setModalContent(titles[type], html);
+    } catch (err) {
+      setModalContent('Error', '<div class="text-center text-danger py-3"><i class="bi bi-exclamation-triangle"></i> Failed to load details.</div>');
+    }
+  };
+
+  function renderWarningsDetail(data) {
+    let html = '';
+
+    // By type breakdown
+    if (data.byType.length > 0) {
+      html += '<h6 class="detail-section-title"><i class="bi bi-pie-chart"></i> By Type</h6>';
+      html += '<div class="detail-badge-row">';
+      data.byType.forEach(t => {
+        const label = t.type === 'manual' ? 'Manual' : t.type === 'crosspost' ? 'Crosspost' : t.type;
+        const cls = t.type === 'manual' ? 'detail-badge-yellow' : 'detail-badge-cyan';
+        html += '<span class="detail-badge ' + cls + '">' + escapeHtml(label) + ': ' + t.count + '</span>';
+      });
+      html += '</div>';
+    }
+
+    // By month
+    if (data.byMonth.length > 0) {
+      html += '<h6 class="detail-section-title"><i class="bi bi-calendar3"></i> By Month</h6>';
+      html += '<div class="detail-bar-list">';
+      const maxCount = Math.max(...data.byMonth.map(m => m.count), 1);
+      data.byMonth.forEach(m => {
+        const pct = (m.count / maxCount) * 100;
+        html += '<div class="detail-bar-row">';
+        html += '<span class="detail-bar-label">' + escapeHtml(m.month) + '</span>';
+        html += '<div class="detail-bar-track"><div class="detail-bar-fill detail-fill-yellow" style="width:' + pct + '%"></div></div>';
+        html += '<span class="detail-bar-value">' + m.count + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    // Recent warnings
+    if (data.recent.length > 0) {
+      html += '<h6 class="detail-section-title"><i class="bi bi-clock-history"></i> Recent Warnings</h6>';
+      html += '<div class="table-responsive"><table class="table table-dark table-striped table-hover mb-0 detail-table">';
+      html += '<thead><tr><th>User</th><th>Moderator</th><th>Type</th><th>Reason</th><th>Date</th></tr></thead><tbody>';
+      data.recent.forEach(w => {
+        const typeBadge = w.type === 'manual'
+          ? '<span class="detail-type-badge detail-type-manual">Manual</span>'
+          : '<span class="detail-type-badge detail-type-crosspost">Crosspost</span>';
+        html += '<tr>';
+        html += '<td>' + resolveUser(w.user_id) + '</td>';
+        html += '<td>' + resolveUser(w.moderator_id) + '</td>';
+        html += '<td>' + typeBadge + '</td>';
+        html += '<td class="detail-reason-cell" title="' + escapeHtml(w.reason || '') + '">' + escapeHtml((w.reason || '--').slice(0, 60)) + '</td>';
+        html += '<td class="detail-date-cell">' + formatDate(w.created_at) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    if (!html) html = '<div class="text-center text-muted py-3">No warning data available.</div>';
+    return html;
+  }
+
+  function renderBansDetail(data) {
+    if (!data.bans || data.bans.length === 0) {
+      return '<div class="text-center text-muted py-3"><i class="bi bi-shield-check"></i> No bans recorded.</div>';
+    }
+
+    let html = '<div class="table-responsive"><table class="table table-dark table-striped table-hover mb-0 detail-table">';
+    html += '<thead><tr><th>Target</th><th>Moderator</th><th>Details</th><th>Date</th></tr></thead><tbody>';
+    data.bans.forEach(b => {
+      html += '<tr>';
+      html += '<td>' + resolveUser(b.target_id) + '</td>';
+      html += '<td>' + resolveUser(b.moderator_id) + '</td>';
+      html += '<td class="detail-reason-cell" title="' + escapeHtml(b.details || '') + '">' + escapeHtml((b.details || '--').slice(0, 60)) + '</td>';
+      html += '<td class="detail-date-cell">' + formatDate(b.created_at) + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  function renderCrosspostDetail(data) {
+    let html = '';
+
+    // By action breakdown
+    if (data.byAction.length > 0) {
+      html += '<h6 class="detail-section-title"><i class="bi bi-funnel"></i> By Action Taken</h6>';
+      html += '<div class="detail-badge-row">';
+      data.byAction.forEach(a => {
+        const cls = a.action_taken === 'deleted' ? 'detail-badge-red' : 'detail-badge-yellow';
+        html += '<span class="detail-badge ' + cls + '">' + escapeHtml(a.action_taken) + ': ' + a.count + '</span>';
+      });
+      html += '</div>';
+    }
+
+    // Top offenders
+    if (data.topOffenders.length > 0) {
+      html += '<h6 class="detail-section-title"><i class="bi bi-person-exclamation"></i> Top Offenders</h6>';
+      html += '<div class="detail-bar-list">';
+      const maxCount = Math.max(...data.topOffenders.map(o => o.count), 1);
+      data.topOffenders.forEach((o, i) => {
+        const pct = (o.count / maxCount) * 100;
+        html += '<div class="detail-bar-row">';
+        html += '<span class="detail-bar-rank">' + (i + 1) + '</span>';
+        html += '<span class="detail-bar-label">' + resolveUser(o.user_id) + '</span>';
+        html += '<div class="detail-bar-track"><div class="detail-bar-fill detail-fill-red" style="width:' + pct + '%"></div></div>';
+        html += '<span class="detail-bar-value">' + o.count + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    // Recent incidents
+    if (data.recent.length > 0) {
+      html += '<h6 class="detail-section-title"><i class="bi bi-clock-history"></i> Recent Incidents</h6>';
+      html += '<div class="table-responsive"><table class="table table-dark table-striped table-hover mb-0 detail-table">';
+      html += '<thead><tr><th>User</th><th>Action</th><th>Similarity</th><th>Date</th></tr></thead><tbody>';
+      data.recent.forEach(r => {
+        const actionBadge = r.action_taken === 'deleted'
+          ? '<span class="detail-type-badge detail-type-deleted">Deleted</span>'
+          : '<span class="detail-type-badge detail-type-warned">Warned</span>';
+        html += '<tr>';
+        html += '<td>' + resolveUser(r.user_id) + '</td>';
+        html += '<td>' + actionBadge + '</td>';
+        html += '<td>' + Math.round(r.similarity_score * 100) + '%</td>';
+        html += '<td class="detail-date-cell">' + formatDate(r.created_at) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    if (!html) html = '<div class="text-center text-muted py-3">No crosspost incident data available.</div>';
+    return html;
+  }
+
+  function renderModsDetail(data) {
+    if (!data.mods || data.mods.length === 0) {
+      return '<div class="text-center text-muted py-3"><i class="bi bi-shield"></i> No moderator actions in the last 30 days.</div>';
+    }
+
+    // Group by moderator
+    const modMap = {};
+    data.mods.forEach(m => {
+      if (!modMap[m.moderator_id]) modMap[m.moderator_id] = { total: 0, actions: {} };
+      modMap[m.moderator_id].actions[m.action_type] = m.count;
+      modMap[m.moderator_id].total += m.count;
+    });
+
+    // Sort by total actions descending
+    const sorted = Object.entries(modMap).sort((a, b) => b[1].total - a[1].total);
+
+    let html = '<div class="table-responsive"><table class="table table-dark table-striped table-hover mb-0 detail-table">';
+    html += '<thead><tr><th>#</th><th>Moderator</th><th>Actions</th><th>Total</th></tr></thead><tbody>';
+    sorted.forEach(([modId, info], i) => {
+      const actionTags = Object.entries(info.actions).map(([type, count]) => {
+        let cls = 'detail-type-other';
+        if (type === 'ban') cls = 'detail-type-deleted';
+        else if (type === 'warn') cls = 'detail-type-manual';
+        else if (type === 'kick') cls = 'detail-type-crosspost';
+        return '<span class="detail-type-badge ' + cls + '">' + escapeHtml(type) + ' ' + count + '</span>';
+      }).join(' ');
+      html += '<tr>';
+      html += '<td>' + (i + 1) + '</td>';
+      html += '<td>' + resolveUser(modId) + '</td>';
+      html += '<td>' + actionTags + '</td>';
+      html += '<td><strong>' + info.total + '</strong></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    return html;
+  }
 })();
 </script>
 
