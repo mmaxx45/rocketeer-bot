@@ -654,10 +654,15 @@ async function handleButton(interaction) {
   if (action === 'ban_appeal') {
     const guildId = params[0];
     if (!guildId) {
-      return interaction.reply({ content: 'Invalid appeal request.', flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: 'Invalid appeal request.' });
     }
 
-    await interaction.deferReply();
+    try {
+      await interaction.deferReply();
+    } catch (err) {
+      logger.error(`Failed to defer ban appeal interaction: ${err.message}`);
+      return;
+    }
 
     try {
       const guild = await interaction.client.guilds.fetch(guildId);
