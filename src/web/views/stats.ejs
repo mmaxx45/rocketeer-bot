@@ -19,10 +19,10 @@
     </div>
   </div>
   <div class="d-flex gap-2 flex-wrap">
-    <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
-      <i class="bi bi-exclamation-triangle"></i> View Warnings
+    <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning btn-sm">
+      <i class="bi bi-exclamation-triangle"></i> Warnings
     </a>
-    <a href="/dashboard/guild/<%= guild.id %>" class="btn btn-outline-primary">
+    <a href="/dashboard/guild/<%= guild.id %>" class="btn btn-outline-primary btn-sm">
       <i class="bi bi-gear"></i> Settings
     </a>
   </div>
@@ -273,13 +273,13 @@
             label: 'Warnings',
             data: data.map(d => d.count),
             borderColor: '#5865f2',
-            backgroundColor: 'rgba(88, 101, 242, 0.15)',
+            backgroundColor: 'rgba(88, 101, 242, 0.1)',
             fill: true,
-            tension: 0.3,
+            tension: 0.4,
             pointBackgroundColor: '#5865f2',
             pointBorderColor: '#5865f2',
             pointRadius: 4,
-            pointHoverRadius: 6,
+            pointHoverRadius: 7,
             borderWidth: 2.5,
           }],
         },
@@ -290,13 +290,16 @@
           plugins: {
             legend: { display: false },
             tooltip: {
-              backgroundColor: 'rgba(30, 31, 34, 0.95)',
-              titleColor: '#fff',
-              bodyColor: '#b5bac1',
-              borderColor: '#5865f2',
+              backgroundColor: 'rgba(17, 21, 32, 0.95)',
+              titleColor: '#e8eaed',
+              bodyColor: '#8b92a5',
+              borderColor: 'rgba(88, 101, 242, 0.3)',
               borderWidth: 1,
-              padding: 10,
+              padding: 12,
+              cornerRadius: 8,
               displayColors: false,
+              titleFont: { family: 'Plus Jakarta Sans', weight: '600' },
+              bodyFont: { family: 'DM Sans' },
               callbacks: {
                 label: function (ctx) {
                   const v = ctx.parsed.y;
@@ -307,15 +310,15 @@
           },
           scales: {
             x: {
-              grid: { color: 'rgba(255,255,255,0.06)' },
-              ticks: { color: '#8b8d91', font: { size: 11 } },
+              grid: { color: 'rgba(255,255,255,0.04)' },
+              ticks: { color: '#5a6178', font: { family: 'DM Sans', size: 11 } },
             },
             y: {
               beginAtZero: true,
-              grid: { color: 'rgba(255,255,255,0.06)' },
+              grid: { color: 'rgba(255,255,255,0.04)' },
               ticks: {
-                color: '#8b8d91',
-                font: { size: 11 },
+                color: '#5a6178',
+                font: { family: 'DM Sans', size: 11 },
                 precision: 0,
               },
             },

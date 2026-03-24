@@ -15,10 +15,10 @@
     <h2><%= guild.name %></h2>
   </div>
   <div class="d-flex gap-2 flex-wrap">
-    <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning">
-      <i class="bi bi-exclamation-triangle"></i> View Warnings
+    <a href="/dashboard/guild/<%= guild.id %>/warnings" class="btn btn-outline-warning btn-sm">
+      <i class="bi bi-exclamation-triangle"></i> Warnings
     </a>
-    <a href="/dashboard/guild/<%= guild.id %>/stats" class="btn btn-outline-info">
+    <a href="/dashboard/guild/<%= guild.id %>/stats" class="btn btn-outline-info btn-sm">
       <i class="bi bi-bar-chart-line"></i> Stats
     </a>
   </div>
@@ -49,14 +49,23 @@
       <a class="sidebar-nav-item" href="#section-exempt" data-section="section-exempt">
         <i class="bi bi-slash-circle"></i> Exempt Channels
       </a>
+      <a class="sidebar-nav-item" href="#section-imageonly" data-section="section-imageonly">
+        <i class="bi bi-image"></i> Image-Only Channels
+      </a>
       <a class="sidebar-nav-item" href="#section-modmail" data-section="section-modmail">
         <i class="bi bi-envelope"></i> Modmail
       </a>
-      <a class="sidebar-nav-item" href="#section-wordfilter" data-section="section-wordfilter">
-        <i class="bi bi-funnel"></i> Word Filter
-      </a>
       <a class="sidebar-nav-item" href="#section-fileblock" data-section="section-fileblock">
         <i class="bi bi-file-earmark-lock"></i> File Blocking
+      </a>
+      <a class="sidebar-nav-item" href="#section-filter" data-section="section-filter">
+        <i class="bi bi-funnel"></i> Word Filter
+      </a>
+      <a class="sidebar-nav-item" href="#section-linkban" data-section="section-linkban">
+        <i class="bi bi-link-45deg"></i> Link Ban List
+      </a>
+      <a class="sidebar-nav-item" href="#section-appeals" data-section="section-appeals">
+        <i class="bi bi-person-check"></i> Ban Appeals
       </a>
       <a class="sidebar-nav-item" href="#section-warnreasons" data-section="section-warnreasons">
         <i class="bi bi-list-check"></i> Warning Reasons
@@ -335,6 +344,45 @@
         </div>
       </div>
 
+      <!-- Image-Only Channels Section -->
+      <div class="settings-section" id="section-imageonly">
+        <div class="section-header">
+          <i class="bi bi-image"></i>
+          <h5>Image-Only Channels</h5>
+        </div>
+        <div class="section-body">
+          <div class="setting-item">
+            <span class="setting-hint">Messages without image attachments will be automatically deleted from these channels.</span>
+            <div class="d-flex flex-wrap gap-2 mb-3" id="image-only-channels-list">
+              <% if (typeof imageOnlyChannels !== 'undefined' && imageOnlyChannels) { %>
+                <% imageOnlyChannels.forEach(chId => { %>
+                  <% const ch = channels.find(c => c.id === chId); %>
+                  <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 image-only-badge" data-channel-id="<%= chId %>">
+                    #<%= ch ? ch.name : chId %>
+                    <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
+                            onclick="removeImageOnlyChannel('<%= guild.id %>', '<%= chId %>', this)"></button>
+                  </span>
+                <% }); %>
+              <% } %>
+            </div>
+            <div class="input-group">
+              <select id="add-image-only-channel" class="form-select">
+                <option value="">-- Select channel --</option>
+                <% channels.forEach(ch => { %>
+                  <% if (typeof imageOnlyChannels === 'undefined' || !imageOnlyChannels || !imageOnlyChannels.includes(ch.id)) { %>
+                    <option value="<%= ch.id %>">#<%= ch.name %></option>
+                  <% } %>
+                <% }); %>
+              </select>
+              <button type="button" class="btn btn-outline-primary"
+                      onclick="addImageOnlyChannel('<%= guild.id %>')">
+                <i class="bi bi-plus-lg"></i> Add
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Modmail Section -->
       <div class="settings-section" id="section-modmail">
         <div class="section-header">
@@ -374,186 +422,6 @@
       </div>
 
       <!-- File Upload Blocking Section -->
-      <!-- Word Filter Section -->
-      <div class="settings-section" id="section-wordfilter">
-        <div class="section-header">
-          <i class="bi bi-funnel"></i>
-          <h5>Word Filter</h5>
-        </div>
-        <div class="section-body">
-          <span class="setting-hint mb-3 d-block">Filter messages containing specific words or phrases. Three tiers:
-            <strong>Hard slur</strong> = auto-delete + warning,
-            <strong>Soft slur</strong> = silent delete (staff notified after repeated offenses),
-            <strong>Auto-delete</strong> = silent delete only. Bypass detection is built in (l33t speak, zero-width chars, etc.).</span>
-
-          <div class="row mb-3">
-            <div class="col-md-4">
-              <div class="setting-item">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" role="switch" id="filter_enabled"
-                         name="filter_enabled" value="1" <%= settings.filter_enabled ? 'checked' : '' %>>
-                  <label class="form-check-label" for="filter_enabled">Filter enabled</label>
-                </div>
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="setting-item">
-                <label class="setting-label">Soft slur threshold</label>
-                <span class="setting-hint">How many soft slur violations before staff is notified.</span>
-                <input type="number" name="soft_slur_threshold" class="form-control" min="1" max="50"
-                       value="<%= settings.soft_slur_threshold || 3 %>">
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="setting-item">
-                <label class="setting-label">Soft slur window (minutes)</label>
-                <span class="setting-hint">Timeframe for counting soft slur violations.</span>
-                <input type="number" name="soft_slur_window_minutes" class="form-control" min="1" max="10080"
-                       value="<%= settings.soft_slur_window_minutes || 60 %>">
-              </div>
-            </div>
-          </div>
-
-          <!-- Add Word Form -->
-          <div class="card bg-dark border-secondary mb-3">
-            <div class="card-body">
-              <h6 class="card-title mb-3">Add Filtered Word</h6>
-              <div class="row g-2 align-items-end">
-                <div class="col-md-5">
-                  <label class="form-label small">Word or phrase</label>
-                  <input type="text" id="filter-word-input" class="form-control" placeholder="Enter word to filter...">
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label small">Tier</label>
-                  <select id="filter-tier-select" class="form-select">
-                    <option value="hard">Hard slur (auto-warn + delete)</option>
-                    <option value="soft">Soft slur (delete, notify after threshold)</option>
-                    <option value="auto_delete">Auto-delete (silent)</option>
-                  </select>
-                </div>
-                <div class="col-md-3">
-                  <button type="button" id="filter-add-btn" class="btn btn-primary w-100" onclick="addFilterWord()">
-                    <i class="bi bi-plus-lg"></i> Add Word
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Filter Word Lists -->
-          <div id="filter-words-container">
-            <div class="text-center py-3 text-muted">Loading filter words...</div>
-          </div>
-        </div>
-      </div>
-
-      <script>
-      (function() {
-        const guildId = '<%= guild.id %>';
-
-        function renderFilterWords(words) {
-          const container = document.getElementById('filter-words-container');
-          if (!words || words.length === 0) {
-            container.innerHTML = '<div class="text-center py-3 text-muted">No filtered words configured yet.</div>';
-            return;
-          }
-
-          const tiers = {
-            hard: { label: 'Hard Slur', color: 'danger', icon: 'exclamation-triangle-fill', words: [] },
-            soft: { label: 'Soft Slur', color: 'warning', icon: 'exclamation-circle', words: [] },
-            auto_delete: { label: 'Auto-Delete', color: 'secondary', icon: 'trash', words: [] },
-          };
-
-          for (const entry of words) {
-            if (tiers[entry.tier]) tiers[entry.tier].words.push(entry.word);
-          }
-
-          let html = '';
-          for (const [tier, data] of Object.entries(tiers)) {
-            if (data.words.length === 0) continue;
-            html += '<div class="mb-3">';
-            html += '<h6 class="text-' + data.color + '"><i class="bi bi-' + data.icon + '"></i> ' + data.label + ' (' + data.words.length + ')</h6>';
-            html += '<div class="d-flex flex-wrap gap-2">';
-            for (const word of data.words) {
-              html += '<span class="badge bg-' + data.color + ' bg-opacity-25 text-' + data.color + ' d-flex align-items-center gap-1" style="font-size: 0.85rem; padding: 0.4em 0.7em;">';
-              html += '<span class="filter-word-spoiler" onclick="this.classList.toggle(\'revealed\')" title="Click to reveal">' + escapeHtml(word) + '</span>';
-              html += '<button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.6em;" onclick="removeFilterWord(\'' + encodeURIComponent(word) + '\')"></button>';
-              html += '</span>';
-            }
-            html += '</div></div>';
-          }
-          container.innerHTML = html;
-        }
-
-        function escapeHtml(s) {
-          const d = document.createElement('div');
-          d.textContent = s;
-          return d.innerHTML;
-        }
-
-        window.loadFilterWords = async function() {
-          try {
-            const res = await fetch('/api/guild/' + guildId + '/filter-words');
-            const data = await res.json();
-            renderFilterWords(data.words);
-          } catch (err) {
-            console.error('Failed to load filter words:', err);
-          }
-        };
-
-        window.addFilterWord = async function() {
-          const wordInput = document.getElementById('filter-word-input');
-          const tierSelect = document.getElementById('filter-tier-select');
-          const word = wordInput.value.trim();
-          const tier = tierSelect.value;
-
-          if (!word) return;
-
-          try {
-            const res = await fetch('/api/guild/' + guildId + '/filter-words', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ word, tier }),
-            });
-            const data = await res.json();
-            if (data.success) {
-              wordInput.value = '';
-              renderFilterWords(data.words);
-            }
-          } catch (err) {
-            console.error('Failed to add filter word:', err);
-          }
-        };
-
-        window.removeFilterWord = async function(encodedWord) {
-          try {
-            const res = await fetch('/api/guild/' + guildId + '/filter-words/' + encodedWord, { method: 'DELETE' });
-            const data = await res.json();
-            if (data.success) {
-              renderFilterWords(data.words);
-            }
-          } catch (err) {
-            console.error('Failed to remove filter word:', err);
-          }
-        };
-
-        // Load on page init
-        loadFilterWords();
-      })();
-      </script>
-
-      <style>
-        .filter-word-spoiler {
-          background: currentColor;
-          border-radius: 3px;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-        .filter-word-spoiler.revealed {
-          background: transparent;
-        }
-      </style>
-
       <div class="settings-section" id="section-fileblock">
         <div class="section-header">
           <i class="bi bi-file-earmark-lock"></i>
@@ -580,6 +448,148 @@
                 <textarea name="blocked_extensions" class="form-control" rows="3"
                           placeholder="exe, bat, cmd, msi, scr, pif, com, vbs, vbe, js, jse, wsf, wsh, ps1, psm1, psd1, reg, inf, hta, cpl, msp, mst, sct, ws, dll, sys, drv, ocx, jar, apk, deb, rpm, dmg, iso, img, lnk, url, desktop"><%= settings.blocked_extensions ? (() => { try { return JSON.parse(settings.blocked_extensions).join(', '); } catch { return ''; } })() : '' %></textarea>
                 <a href="#" class="small mt-1 d-inline-block reset-default" data-target="blocked_extensions">Reset to default</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Word Filter Section -->
+      <div class="settings-section" id="section-filter">
+        <div class="section-header">
+          <i class="bi bi-funnel"></i>
+          <h5>Word Filter</h5>
+        </div>
+        <div class="section-body">
+          <span class="setting-hint mb-3 d-block">Filter messages containing banned words. Hard-filtered words are instantly deleted, soft-filtered words trigger after a threshold, auto-delete words are silently removed.</span>
+          <div class="row">
+            <div class="col-md-4">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-toggle-on"></i> Enable Word Filter</label>
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" role="switch" id="filter_enabled"
+                         name="filter_enabled" value="1" <%= settings.filter_enabled ? 'checked' : '' %>>
+                  <label class="form-check-label" for="filter_enabled">Enabled</label>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="setting-item">
+                <label class="setting-label">Soft Slur Threshold</label>
+                <span class="setting-hint">Number of soft-filtered words within the window before action.</span>
+                <input type="number" name="soft_slur_threshold" class="form-control" min="1" max="50"
+                       value="<%= settings.soft_slur_threshold || 3 %>">
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="setting-item">
+                <label class="setting-label">Soft Slur Window</label>
+                <span class="setting-hint">Time window in minutes for soft-filtered word tracking.</span>
+                <div class="input-group">
+                  <input type="number" name="soft_slur_window_minutes" class="form-control" min="1" max="1440"
+                         value="<%= settings.soft_slur_window_minutes || 10 %>">
+                  <span class="input-group-text">min</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Add Word -->
+          <div class="setting-item mt-3">
+            <label class="setting-label">Add Filtered Word</label>
+            <div class="d-flex gap-2">
+              <input type="text" id="filter-word-input" class="form-control" placeholder="Enter word..." style="max-width: 250px;">
+              <select id="filter-word-tier" class="form-select" style="max-width: 150px;">
+                <option value="hard">Hard</option>
+                <option value="soft">Soft</option>
+                <option value="auto_delete">Auto Delete</option>
+              </select>
+              <button type="button" class="btn btn-outline-primary" onclick="addFilterWord('<%= guild.id %>')">
+                <i class="bi bi-plus-lg"></i> Add
+              </button>
+            </div>
+          </div>
+
+          <!-- Word List -->
+          <div class="mt-3" id="filter-words-container">
+            <div class="text-center py-3" id="filter-words-loading">
+              <span class="loading-spinner"></span>
+              <span class="ms-2" style="color: var(--text-muted); font-size: 0.88rem;">Loading filtered words...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Link Ban List Section -->
+      <div class="settings-section" id="section-linkban">
+        <div class="section-header">
+          <i class="bi bi-link-45deg"></i>
+          <h5>Link Ban List</h5>
+        </div>
+        <div class="section-body">
+          <div class="setting-item">
+            <span class="setting-hint">Messages containing links to these domains will be automatically deleted.</span>
+            <div class="d-flex flex-wrap gap-2 mb-3" id="banned-domains-list">
+              <% if (typeof bannedDomains !== 'undefined' && bannedDomains) { %>
+                <% bannedDomains.forEach(domain => { %>
+                  <span class="badge bg-secondary d-flex align-items-center gap-1 py-1 domain-badge" data-domain="<%= domain %>">
+                    <i class="bi bi-globe2" style="font-size: 0.7rem;"></i> <%= domain %>
+                    <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
+                            onclick="removeBannedDomain('<%= guild.id %>', '<%= domain %>', this)"></button>
+                  </span>
+                <% }); %>
+              <% } %>
+            </div>
+            <div class="input-group">
+              <input type="text" id="banned-domain-input" class="form-control" placeholder="example.com">
+              <button type="button" class="btn btn-outline-primary"
+                      onclick="addBannedDomain('<%= guild.id %>')">
+                <i class="bi bi-plus-lg"></i> Add
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ban Appeals Section -->
+      <div class="settings-section" id="section-appeals">
+        <div class="section-header">
+          <i class="bi bi-person-check"></i>
+          <h5>Ban Appeals</h5>
+        </div>
+        <div class="section-body">
+          <span class="setting-hint mb-3 d-block">Allow banned users to submit appeals through the bot. When enabled, banned users can DM the bot to request an appeal, which creates a channel in the specified category for moderator review.</span>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-toggle-on"></i> Enable Ban Appeals</label>
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" role="switch" id="appeal_enabled"
+                         name="appeal_enabled" value="1" <%= settings.appeal_enabled ? 'checked' : '' %>>
+                  <label class="form-check-label" for="appeal_enabled">Appeals enabled</label>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-folder"></i> Appeal Category</label>
+                <span class="setting-hint">Category where appeal channels will be created.</span>
+                <select name="appeal_category_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% categories.forEach(cat => { %>
+                    <option value="<%= cat.id %>" <%= settings.appeal_category_id === cat.id ? 'selected' : '' %>>
+                      <%= cat.name %>
+                    </option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label"><i class="bi bi-link-45deg"></i> Server Invite Code</label>
+                <span class="setting-hint">A permanent invite code so unbanned users can rejoin. Just the code, not the full URL (e.g. <code>abc123</code>).</span>
+                <input type="text" name="appeal_invite_code" class="form-control" placeholder="abc123"
+                       value="<%= settings.appeal_invite_code || '' %>" maxlength="32">
               </div>
             </div>
           </div>
@@ -693,5 +703,117 @@ Please review the channel list and post in the most appropriate channel moving f
     </div>
   </div>
 </form>
+
+<script>
+// Word filter: load words on page load
+(function() {
+  const guildId = '<%= guild.id %>';
+
+  async function loadFilterWords() {
+    const container = document.getElementById('filter-words-container');
+    const loading = document.getElementById('filter-words-loading');
+    try {
+      const res = await fetch(`/api/guild/${guildId}/filter-words`);
+      const result = await res.json();
+      if (loading) loading.remove();
+
+      const words = result.words || [];
+      if (words.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.88rem;">No filtered words configured.</p>';
+        return;
+      }
+
+      // Group by tier
+      const groups = { hard: [], soft: [], auto_delete: [] };
+      words.forEach(w => {
+        const tier = w.tier || 'hard';
+        if (!groups[tier]) groups[tier] = [];
+        groups[tier].push(w);
+      });
+
+      let html = '';
+      const tierLabels = { hard: 'Hard Filter', soft: 'Soft Filter', auto_delete: 'Auto Delete' };
+      for (const [tier, items] of Object.entries(groups)) {
+        if (items.length === 0) continue;
+        html += `<div class="filter-word-group">`;
+        html += `<div class="filter-word-group-label">${tierLabels[tier] || tier} (${items.length})</div>`;
+        html += `<div class="filter-words-container">`;
+        items.forEach(w => {
+          html += `<div class="filter-word-item">
+            <span class="tier-badge-${tier}">${tier}</span>
+            <span class="filter-word-spoiler" onclick="this.classList.toggle('revealed')">${escapeHtml(w.word)}</span>
+            <button type="button" class="filter-word-delete" onclick="removeFilterWord('${guildId}', ${w.id}, this)" title="Remove">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>`;
+        });
+        html += `</div></div>`;
+      }
+      container.innerHTML = html;
+    } catch (err) {
+      if (loading) loading.remove();
+      container.innerHTML = '<p style="color: var(--accent-red); font-size: 0.88rem;">Failed to load filtered words.</p>';
+    }
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  window.addFilterWord = async function(guildId) {
+    const input = document.getElementById('filter-word-input');
+    const tierSelect = document.getElementById('filter-word-tier');
+    const word = input.value.trim();
+    if (!word) return;
+
+    try {
+      const res = await fetch(`/api/guild/${guildId}/filter-words`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word, tier: tierSelect.value }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        input.value = '';
+        showToast('Word added to filter.');
+        loadFilterWords();
+      } else {
+        showToast(result.error || 'Failed to add word', 'error');
+      }
+    } catch (err) {
+      showToast('Failed: ' + err.message, 'error');
+    }
+  };
+
+  window.removeFilterWord = async function(guildId, wordId, btn) {
+    try {
+      const res = await fetch(`/api/guild/${guildId}/filter-words/${wordId}`, {
+        method: 'DELETE',
+      });
+      const result = await res.json();
+      if (result.success) {
+        const item = btn.closest('.filter-word-item');
+        if (item) {
+          item.style.transition = 'opacity 0.2s ease';
+          item.style.opacity = '0';
+          setTimeout(() => {
+            item.remove();
+            loadFilterWords();
+          }, 200);
+        }
+        showToast('Word removed from filter.');
+      } else {
+        showToast(result.error || 'Failed', 'error');
+      }
+    } catch (err) {
+      showToast('Failed: ' + err.message, 'error');
+    }
+  };
+
+  loadFilterWords();
+})();
+</script>
 
 <%- footer %>
