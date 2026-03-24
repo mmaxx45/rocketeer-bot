@@ -48,10 +48,10 @@ async function sendBanDM(client, guild, targetId, reason, duration, settings) {
       ));
     }
 
-    if (settings.server_invite_code) {
+    if (settings.server_invite_code && duration) {
       dmEmbed.addFields({
         name: 'Rejoin After Ban',
-        value: `If your ban is lifted, you can rejoin using: https://discord.gg/${settings.server_invite_code}`,
+        value: `After your ban expires, you can rejoin using: https://discord.gg/${settings.server_invite_code}`,
       });
     }
 
@@ -657,7 +657,7 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'Invalid appeal request.', flags: MessageFlags.Ephemeral });
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.deferReply();
 
     try {
       const guild = await interaction.client.guilds.fetch(guildId);
@@ -766,7 +766,7 @@ async function handleButton(interaction) {
       logger.info(`Ban appeal created: user=${interaction.user.username} guild=${guild.name} appealId=${appealId}`);
     } catch (err) {
       logger.error(`Failed to create ban appeal: ${err.message}`);
-      await interaction.editReply({ content: `Failed to submit appeal: ${err.message}` });
+      await interaction.editReply({ content: 'Failed to submit your appeal. Please try again later or contact a server admin.' });
     }
     return;
   }
