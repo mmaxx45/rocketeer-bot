@@ -434,29 +434,26 @@ async function handleButton(interaction) {
         components: [],
       });
 
-      // Archive and lock the channel
+      // Delete the channel after a brief delay
       try {
         const channel = await interaction.guild.channels.fetch(channelId);
         if (channel) {
-          const closedName = channel.name.startsWith('closed-') ? channel.name : `closed-${channel.name}`;
-          await channel.setName(closedName.slice(0, 100));
-          // Send a final message
+          // Send a final message so mods see it before deletion
           await channel.send({
             embeds: [
               new EmbedBuilder()
                 .setTitle('Thread Closed')
-                .setDescription(`This modmail thread was closed by <@${interaction.user.id}>.`)
+                .setDescription(`This modmail thread was closed by <@${interaction.user.id}>. This channel will be deleted in 5 seconds.`)
                 .setColor(0xE74C3C)
                 .setTimestamp(),
             ],
           });
-          // Lock the channel by denying SendMessages for everyone
-          await channel.permissionOverwrites.edit(interaction.guild.roles.everyone.id, {
-            SendMessages: false,
-          });
+          // Brief delay so the message is visible
+          await new Promise(r => setTimeout(r, 5000));
+          await channel.delete('Modmail thread closed');
         }
       } catch (err) {
-        logger.warn(`Failed to archive modmail channel: ${err.message}`);
+        logger.warn(`Failed to delete modmail channel: ${err.message}`);
       }
 
       logger.info(`Modmail thread closed: channel=${channelId} closedBy=${interaction.user.username}`);
