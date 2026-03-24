@@ -14,7 +14,7 @@ module.exports = {
       opt.setName('user').setDescription('The user to ban').setRequired(true)
     )
     .addStringOption(opt =>
-      opt.setName('reason').setDescription('Reason for the ban').setRequired(false)
+      opt.setName('reason').setDescription('Reason for the ban').setRequired(true)
     )
     .addIntegerOption(opt =>
       opt.setName('delete_messages_days')
@@ -33,7 +33,7 @@ module.exports = {
     }
 
     const targetUser = interaction.options.getUser('user');
-    const reason = interaction.options.getString('reason') || 'No reason provided';
+    const reason = interaction.options.getString('reason');
     const deleteMessageDays = interaction.options.getInteger('delete_messages_days') || 0;
 
     if (targetUser.bot) {

@@ -317,7 +317,7 @@ async function handleButton(interaction) {
       // Post public message in channel
       try {
         await interaction.channel.send({
-          content: `<@${pending.targetId}> has been banned from the server.\n**Reason:** ${pending.reason}`,
+          content: `<@${pending.targetId}> has been banned from the server.`,
         });
       } catch (err) {
         logger.warn(`Failed to send public ban notification: ${err.message}`);
