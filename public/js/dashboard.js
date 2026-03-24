@@ -309,7 +309,9 @@ async function loadSelfRolePanels(guildId) {
             </div>
             <div>
               <label class="setting-label" style="font-size:0.75rem;">Emoji</label>
-              <input type="text" id="selfrole-add-emoji-${panel.id}" class="form-control form-control-sm" placeholder="🎮" style="width:70px;">
+              <select id="selfrole-add-emoji-${panel.id}" class="form-select form-select-sm" style="min-width:160px;">
+                <option value="">-- No emoji --</option>
+              </select>
             </div>
             <div>
               <label class="setting-label" style="font-size:0.75rem;">Label <span class="text-muted">(optional)</span></label>
@@ -334,6 +336,16 @@ async function loadSelfRolePanels(guildId) {
           opt.textContent = r.name;
           roleSelect.appendChild(opt);
         }
+      });
+
+      // Populate the emoji dropdown with server custom emojis
+      const emojiSelect = document.getElementById(`selfrole-add-emoji-${panel.id}`);
+      const allEmojis = window.__guildEmojis || [];
+      allEmojis.forEach(e => {
+        const opt = document.createElement('option');
+        opt.value = e.identifier;
+        opt.textContent = `:${e.name}:`;
+        emojiSelect.appendChild(opt);
       });
     });
   } catch (err) {
@@ -392,7 +404,7 @@ async function deleteSelfRolePanel(guildId, panelId) {
 
 async function addSelfRole(guildId, panelId) {
   const roleId = document.getElementById(`selfrole-add-role-${panelId}`).value;
-  const emoji = document.getElementById(`selfrole-add-emoji-${panelId}`).value.trim();
+  const emoji = document.getElementById(`selfrole-add-emoji-${panelId}`).value;
   const label = document.getElementById(`selfrole-add-label-${panelId}`).value.trim();
 
   if (!roleId) { showToast('Select a role', 'error'); return; }

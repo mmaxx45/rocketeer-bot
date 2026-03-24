@@ -865,8 +865,9 @@ Please review the channel list and post in the most appropriate channel moving f
   loadFilterWords();
 })();
 
-// Pass guild roles to JS for self-role panel dropdowns
+// Pass guild roles and emojis to JS for self-role panel dropdowns
 window.__guildRoles = <%- JSON.stringify(roles) %>;
+window.__guildEmojis = <%- JSON.stringify(emojis) %>;
 // Load self-role panels
 loadSelfRolePanels('<%= guild.id %>');
 </script>

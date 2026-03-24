@@ -118,6 +118,10 @@ module.exports = function (client) {
       .sort((a, b) => a.position - b.position)
       .map(c => ({ id: c.id, name: c.name }));
 
+    const emojis = botGuild.emojis.cache
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(e => ({ id: e.id, name: e.name, animated: e.animated, identifier: e.animated ? `<a:${e.name}:${e.id}>` : `<:${e.name}:${e.id}>`, url: e.url }));
+
     const guild = { id: botGuild.id, name: botGuild.name, icon: botGuild.iconURL() };
     res.render('guild', {
       user: req.user,
@@ -130,6 +134,7 @@ module.exports = function (client) {
       roles,
       channels,
       categories,
+      emojis,
     });
   });
 
