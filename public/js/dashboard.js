@@ -309,9 +309,12 @@ async function loadSelfRolePanels(guildId) {
             </div>
             <div>
               <label class="setting-label" style="font-size:0.75rem;">Emoji</label>
-              <select id="selfrole-add-emoji-${panel.id}" class="form-select form-select-sm" style="min-width:160px;">
-                <option value="">-- No emoji --</option>
-              </select>
+              <div class="input-group input-group-sm" style="min-width:200px;">
+                <select id="selfrole-add-emoji-${panel.id}" class="form-select form-select-sm" style="min-width:120px;">
+                  <option value="">Server emoji...</option>
+                </select>
+                <input type="text" id="selfrole-add-emoji-unicode-${panel.id}" class="form-control form-control-sm" placeholder="or 🎮" style="width:55px;">
+              </div>
             </div>
             <div>
               <label class="setting-label" style="font-size:0.75rem;">Label <span class="text-muted">(optional)</span></label>
@@ -404,7 +407,9 @@ async function deleteSelfRolePanel(guildId, panelId) {
 
 async function addSelfRole(guildId, panelId) {
   const roleId = document.getElementById(`selfrole-add-role-${panelId}`).value;
-  const emoji = document.getElementById(`selfrole-add-emoji-${panelId}`).value;
+  const emojiSelect = document.getElementById(`selfrole-add-emoji-${panelId}`).value;
+  const emojiUnicode = document.getElementById(`selfrole-add-emoji-unicode-${panelId}`).value.trim();
+  const emoji = emojiUnicode || emojiSelect; // Unicode text input takes priority
   const label = document.getElementById(`selfrole-add-label-${panelId}`).value.trim();
 
   if (!roleId) { showToast('Select a role', 'error'); return; }
