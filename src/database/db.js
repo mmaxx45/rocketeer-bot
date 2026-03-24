@@ -268,6 +268,36 @@ function runMigrations() {
     db.pragma('user_version = 17');
   }
 
+  if (version < 18) {
+    logger.info('Running database migration v18: self-assignable roles');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS self_role_panels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        title TEXT DEFAULT 'Self Roles',
+        description TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_self_role_panels_guild ON self_role_panels(guild_id);
+      CREATE INDEX IF NOT EXISTS idx_self_role_panels_message ON self_role_panels(message_id);
+
+      CREATE TABLE IF NOT EXISTS self_role_options (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        panel_id INTEGER NOT NULL REFERENCES self_role_panels(id) ON DELETE CASCADE,
+        role_id TEXT NOT NULL,
+        label TEXT DEFAULT NULL,
+        emoji TEXT DEFAULT NULL,
+        description TEXT DEFAULT NULL,
+        sort_order INTEGER DEFAULT 0
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_self_role_options_panel ON self_role_options(panel_id);
+    `);
+    db.pragma('user_version = 18');
+  }
 
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }

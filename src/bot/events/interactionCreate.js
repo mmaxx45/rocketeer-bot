@@ -11,6 +11,7 @@ const { buildWarningsEmbed } = require('../utils/embeds');
 const { parseDuration, formatDuration } = require('../utils/parseDuration');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
 const { createTicket, getOpenTicketByUser, getOpenTicketByChannel, closeTicket } = require('../../database/tickets');
+const { getRoleOptions } = require('../../database/selfRoles');
 
 const DEFAULT_WARN_REASONS = [
   'Spam or flooding',
@@ -965,6 +966,45 @@ async function handleButton(interaction) {
       await interaction.editReply({ content: `Failed to retrieve license: ${err.message}` });
     }
     return;
+  }
+
+  if (action === 'selfrole') {
+    const panelId = parseInt(params[0], 10);
+    const roleId = params[1];
+
+    if (!panelId || !roleId) {
+      return interaction.reply({ content: 'Invalid self-role button.', flags: MessageFlags.Ephemeral });
+    }
+
+    try {
+      const member = interaction.member;
+      const role = interaction.guild.roles.cache.get(roleId);
+
+      if (!role) {
+        return interaction.reply({ content: 'This role no longer exists. An admin should refresh the panel.', flags: MessageFlags.Ephemeral });
+      }
+
+      // Check bot can manage this role
+      const botMember = interaction.guild.members.me;
+      if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        return interaction.reply({ content: 'I don\'t have permission to manage roles.', flags: MessageFlags.Ephemeral });
+      }
+
+      if (role.position >= botMember.roles.highest.position) {
+        return interaction.reply({ content: 'I can\'t assign this role because it\'s above my highest role.', flags: MessageFlags.Ephemeral });
+      }
+
+      if (member.roles.cache.has(roleId)) {
+        await member.roles.remove(roleId);
+        return interaction.reply({ content: `Removed **${role.name}**`, flags: MessageFlags.Ephemeral });
+      } else {
+        await member.roles.add(roleId);
+        return interaction.reply({ content: `Added **${role.name}**`, flags: MessageFlags.Ephemeral });
+      }
+    } catch (err) {
+      logger.error(`Failed to toggle self-role: ${err.message}`);
+      return interaction.reply({ content: `Failed to toggle role: ${err.message}`, flags: MessageFlags.Ephemeral });
+    }
   }
 
   if (action === 'modactions_page') {
