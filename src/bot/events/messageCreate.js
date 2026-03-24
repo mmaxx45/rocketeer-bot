@@ -1,12 +1,12 @@
 const crypto = require('crypto');
 const logger = require('../../logger');
-const { getSettings, getExemptChannels } = require('../../database/settings');
+const { getSettings, getExemptChannels, getImageOnlyChannels } = require('../../database/settings');
 const { cacheMessage, getRecentMessages, deleteMessage } = require('../../database/messages');
 const { addWarning, getWarningCount } = require('../../database/warnings');
 const { addModAction } = require('../../database/modactions');
 const { getSimilarity, normalizeMessage, MIN_MESSAGE_LENGTH } = require('../utils/similarity');
 const { isExempt } = require('../utils/permissions');
-const { getBlockedExtensions, isBlockedFile } = require('../utils/fileFilter');
+const { getBlockedExtensions, isBlockedFile, isBlockedByContentType, isImageAttachment, hasMediaAttachments, getMediaType } = require('../utils/fileFilter');
 const { parseBannedDomains, checkForBannedLinks } = require('../utils/linkFilter');
 const { checkMessage } = require('../utils/wordFilter');
 const { getFilterWords, addFilterViolation, getRecentViolations } = require('../../database/wordFilter');
@@ -46,6 +46,9 @@ async function hashAttachments(attachments) {
   for (const [, attachment] of attachments) {
     if (count >= MAX_ATTACHMENTS_TO_HASH) break;
     if (attachment.size > MAX_ATTACHMENT_HASH_SIZE || attachment.size === 0) continue;
+
+    const mediaType = getMediaType(attachment);
+
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), ATTACHMENT_FETCH_TIMEOUT_MS);
@@ -53,7 +56,8 @@ async function hashAttachments(attachments) {
       clearTimeout(timeout);
       if (!res.ok) continue;
       const buffer = Buffer.from(await res.arrayBuffer());
-      hashes.push(crypto.createHash('sha256').update(buffer).digest('hex'));
+      const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+      hashes.push({ hash, mediaType, name: attachment.name || 'unknown' });
       count++;
     } catch {
       // Skip unhashable/timed-out attachments
@@ -370,10 +374,18 @@ module.exports = {
       let blockedFilename = null;
 
       for (const [, attachment] of message.attachments) {
+        // Check by file extension
         const ext = isBlockedFile(attachment.name, blockedExtensions);
         if (ext) {
           blockedExt = ext;
           blockedFilename = attachment.name;
+          break;
+        }
+        // Also check by MIME contentType for files that might have misleading extensions
+        const mimeExt = isBlockedByContentType(attachment.contentType, blockedExtensions);
+        if (mimeExt) {
+          blockedExt = mimeExt;
+          blockedFilename = attachment.name || 'unknown';
           break;
         }
       }
@@ -594,15 +606,49 @@ module.exports = {
       }
     }
 
+    // --- Image-only channel enforcement ---
+    if (!memberIsExempt && !isExemptChannel) {
+      const imageOnlyChannels = getImageOnlyChannels(guildId);
+      if (imageOnlyChannels.includes(message.channel.id)) {
+        const messageHasMedia = hasMediaAttachments(message.attachments);
+        // If the message has no image/video attachments, delete it
+        if (!messageHasMedia) {
+          logger.info(`Image-only channel violation: user=${message.author.username} guild=${guildId} channel=${message.channel.id}`);
+
+          try {
+            await message.delete();
+          } catch (err) {
+            logger.warn(`Failed to delete non-media message in image-only channel: ${err.message}`);
+          }
+
+          try {
+            const notice = await message.channel.send({
+              content: `<@${message.author.id}>, this channel only allows images and videos. Text-only messages are not permitted here.`,
+            });
+            // Auto-delete the notice after 5 seconds to keep the channel clean
+            setTimeout(() => {
+              notice.delete().catch(() => {});
+            }, 5000);
+          } catch (err) {
+            logger.warn(`Failed to send image-only channel notification: ${err.message}`);
+          }
+
+          return;
+        }
+      }
+    }
+
     // --- Crosspost detection ---
     const normalized = hasContent ? normalizeMessage(message.content) : '';
     const hasDetectableText = normalized.length >= MIN_MESSAGE_LENGTH;
 
     // Hash attachments for crosspost comparison
-    let attachmentHashes = [];
+    let attachmentHashDetails = [];
     if (hasAttachments) {
-      attachmentHashes = await hashAttachments(message.attachments);
+      attachmentHashDetails = await hashAttachments(message.attachments);
     }
+    // Extract plain hash strings for cache storage and comparison
+    const attachmentHashes = attachmentHashDetails.map(d => d.hash);
     const hasDetectableAttachments = attachmentHashes.length > 0;
 
     // Nothing to detect crosspost on
@@ -637,11 +683,15 @@ module.exports = {
     let bestMatch = null;
     let bestScore = 0;
 
+    let matchType = null; // 'sha256-image', 'sha256-other', 'text-similarity', 'name-match'
     for (const cached of recentMessages) {
-      // Attachment hash match — identical file is an exact match
+      // Attachment hash match — identical file is an exact match (SHA256)
       if (hasDetectableAttachments && cached.attachment_hashes && cached.attachment_hashes.length > 0) {
         const hasCommonHash = attachmentHashes.some(h => cached.attachment_hashes.includes(h));
         if (hasCommonHash) {
+          // Determine if the match is image-specific
+          const matchedDetail = attachmentHashDetails.find(d => cached.attachment_hashes.includes(d.hash));
+          matchType = matchedDetail && matchedDetail.mediaType === 'image' ? 'sha256-image' : 'sha256-other';
           bestMatch = cached;
           bestScore = 100;
           break; // exact match, stop searching
@@ -653,6 +703,7 @@ module.exports = {
         if (score >= threshold && score > bestScore) {
           bestMatch = cached;
           bestScore = score;
+          matchType = 'text-similarity';
         }
       }
     }
@@ -662,7 +713,8 @@ module.exports = {
 
     if (!bestMatch) return;
 
-    logger.info(`Crosspost detected: user=${message.author.username} guild=${guildId} similarity=${bestScore.toFixed(1)}% channel1=${bestMatch.channel_id} channel2=${message.channel.id}`);
+    const matchInfo = matchType ? ` matchType=${matchType}` : '';
+    logger.info(`Crosspost detected: user=${message.author.username} guild=${guildId} similarity=${bestScore.toFixed(1)}%${matchInfo} channel1=${bestMatch.channel_id} channel2=${message.channel.id}`);
 
     // Delete both messages
     try {

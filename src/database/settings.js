@@ -42,6 +42,7 @@ function getStmts() {
         filter_enabled: db.prepare(`UPDATE guild_settings SET filter_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         soft_slur_threshold: db.prepare(`UPDATE guild_settings SET soft_slur_threshold = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         soft_slur_window_minutes: db.prepare(`UPDATE guild_settings SET soft_slur_window_minutes = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        image_only_channels: db.prepare(`UPDATE guild_settings SET image_only_channels = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }
@@ -141,6 +142,15 @@ function getBannedDomains(guildId) {
   }
 }
 
+function getImageOnlyChannels(guildId) {
+  const settings = getSettings(guildId);
+  try {
+    return JSON.parse(settings.image_only_channels || '[]');
+  } catch {
+    return [];
+  }
+}
+
 function addBannedDomain(guildId, domain) {
   const domains = getBannedDomains(guildId);
   const normalized = domain.toLowerCase().trim();
@@ -159,6 +169,22 @@ function removeBannedDomain(guildId, domain) {
   return filtered;
 }
 
+function addImageOnlyChannel(guildId, channelId) {
+  const channels = getImageOnlyChannels(guildId);
+  if (!channels.includes(channelId)) {
+    channels.push(channelId);
+    updateSetting(guildId, 'image_only_channels', JSON.stringify(channels));
+  }
+  return channels;
+}
+
+function removeImageOnlyChannel(guildId, channelId) {
+  const channels = getImageOnlyChannels(guildId);
+  const filtered = channels.filter(id => id !== channelId);
+  updateSetting(guildId, 'image_only_channels', JSON.stringify(filtered));
+  return filtered;
+}
+
 module.exports = {
   getSettings,
   updateSetting,
@@ -173,4 +199,7 @@ module.exports = {
   getBannedDomains,
   addBannedDomain,
   removeBannedDomain,
+  getImageOnlyChannels,
+  addImageOnlyChannel,
+  removeImageOnlyChannel,
 };

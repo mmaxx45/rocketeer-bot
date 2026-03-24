@@ -262,6 +262,13 @@ function runMigrations() {
     db.pragma('user_version = 16');
   }
 
+  if (version < 17) {
+    logger.info('Running database migration v17: add image_only_channels');
+    safeAddColumn('guild_settings', 'image_only_channels', 'TEXT DEFAULT NULL');
+    db.pragma('user_version = 17');
+  }
+
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 
