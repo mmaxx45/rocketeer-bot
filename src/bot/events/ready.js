@@ -1,7 +1,10 @@
-const { REST, Routes, ActivityType } = require('discord.js');
+const { REST, Routes, ActivityType, EmbedBuilder } = require('discord.js');
 const config = require('../../config');
 const logger = require('../../logger');
 const { db } = require('../../database/db');
+const { getDueTempBans, markUnbanned } = require('../../database/tempbans');
+const { getSettings } = require('../../database/settings');
+const { addModAction } = require('../../database/modactions');
 
 async function registerCommands(client) {
   const commands = [...client.commands.values()].map(c => c.data.toJSON());
@@ -59,5 +62,73 @@ module.exports = {
       }
     }
 
+    // Start periodic temp ban expiry checker (every 60 seconds)
+    const tempBanInterval = setInterval(() => checkExpiredTempBans(client), 60 * 1000);
+    // Run once immediately on startup
+    checkExpiredTempBans(client);
+
   },
 };
+
+async function checkExpiredTempBans(client) {
+  let dueBans;
+  try {
+    dueBans = getDueTempBans();
+  } catch (err) {
+    logger.error(`Failed to fetch due temp bans: ${err.message}`);
+    return;
+  }
+
+  for (const ban of dueBans) {
+    try {
+      const guild = client.guilds.cache.get(ban.guild_id);
+      if (!guild) {
+        logger.warn(`Temp ban expired but guild ${ban.guild_id} not found, marking as unbanned`);
+        markUnbanned(ban.id);
+        continue;
+      }
+
+      try {
+        await guild.bans.remove(ban.user_id, 'Temporary ban expired');
+      } catch (err) {
+        // User may already be unbanned manually
+        logger.warn(`Failed to unban user ${ban.user_id} in guild ${ban.guild_id}: ${err.message}`);
+      }
+
+      markUnbanned(ban.id);
+
+      try {
+        addModAction(ban.guild_id, client.user.id, 'unban', ban.user_id, 'Temporary ban expired');
+      } catch (err) {
+        logger.warn(`Failed to log temp unban mod action: ${err.message}`);
+      }
+
+      // Log to ban log channel
+      const settings = getSettings(ban.guild_id);
+      if (settings && settings.ban_log_channel_id) {
+        try {
+          const logChannel = await guild.channels.fetch(settings.ban_log_channel_id);
+          if (logChannel) {
+            const logEmbed = new EmbedBuilder()
+              .setTitle('Temporary Ban Expired')
+              .setColor(0x00FF00)
+              .addFields(
+                { name: 'User', value: `<@${ban.user_id}> (${ban.user_id})`, inline: true },
+                { name: 'Originally banned by', value: `<@${ban.moderator_id}>`, inline: true },
+                { name: 'Duration', value: `${ban.duration_days} day(s)`, inline: true },
+                { name: 'Original Reason', value: ban.reason || 'No reason provided' },
+              )
+              .setTimestamp();
+            await logChannel.send({ embeds: [logEmbed] });
+          }
+        } catch (err) {
+          logger.warn(`Failed to post temp unban log: ${err.message}`);
+        }
+      }
+
+      logger.info(`Temp ban expired: unbanned user ${ban.user_id} in guild ${ban.guild_id}`);
+    } catch (err) {
+      logger.error(`Error processing expired temp ban ${ban.id}: ${err.message}`);
+    }
+  }
+}
