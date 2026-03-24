@@ -1,5 +1,5 @@
 const express = require('express');
-const { getSettings, getExemptChannels, getLicenseRequiredRoles, getLicenseRolePrices } = require('../../database/settings');
+const { getSettings, getExemptChannels, getLicenseRequiredRoles, getLicenseRolePrices, getBannedDomains, getImageOnlyChannels } = require('../../database/settings');
 const { getAllGuildWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const { MANAGE_GUILD, userCanManageGuild } = require('../middleware/auth');
@@ -102,6 +102,8 @@ module.exports = function (client) {
     const exemptChannels = getExemptChannels(guildId);
     const licenseRequiredRoles = getLicenseRequiredRoles(guildId);
     const licenseRolePrices = getLicenseRolePrices(guildId);
+    const bannedDomains = getBannedDomains(guildId);
+    const imageOnlyChannels = getImageOnlyChannels(guildId);
 
     const roles = botGuild.roles.cache
       .filter(r => r.id !== guildId) // exclude @everyone
@@ -127,6 +129,8 @@ module.exports = function (client) {
       exemptChannels,
       licenseRequiredRoles,
       licenseRolePrices,
+      bannedDomains,
+      imageOnlyChannels,
       roles,
       channels,
       categories,

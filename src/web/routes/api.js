@@ -3,7 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { ActivityType } = require('discord.js');
-const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, addLicenseRequiredRole, removeLicenseRequiredRole, setLicenseRolePrice, addImageOnlyChannel, removeImageOnlyChannel } = require('../../database/settings');
+const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, addLicenseRequiredRole, removeLicenseRequiredRole, setLicenseRolePrice, getBannedDomains, addBannedDomain, removeBannedDomain, getImageOnlyChannels, addImageOnlyChannel, removeImageOnlyChannel } = require('../../database/settings');
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const logger = require('../../logger');
@@ -643,6 +643,187 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to remove filter word:', err);
       res.status(500).json({ error: 'Failed to remove filter word' });
+    }
+  });
+
+  // ========== Banned Domains ==========
+
+  // Get banned domains
+  router.get('/guild/:guildId/banned-domains', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    try {
+      const domains = getBannedDomains(guildId);
+      res.json({ success: true, domains });
+    } catch (err) {
+      logger.error('Failed to get banned domains:', err);
+      res.status(500).json({ error: 'Failed to get banned domains' });
+    }
+  });
+
+  // Add or remove a banned domain
+  router.post('/guild/:guildId/banned-domains', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const { domain, action } = req.body;
+
+    if (!domain || typeof domain !== 'string') {
+      return res.status(400).json({ error: 'Domain is required' });
+    }
+
+    try {
+      let domains;
+      if (action === 'add') {
+        domains = addBannedDomain(guildId, domain);
+      } else if (action === 'remove') {
+        domains = removeBannedDomain(guildId, domain);
+      } else {
+        return res.status(400).json({ error: 'Invalid action. Use "add" or "remove".' });
+      }
+      res.json({ success: true, domains });
+    } catch (err) {
+      logger.error('Failed to update banned domains:', err);
+      res.status(500).json({ error: 'Failed to update banned domains' });
+    }
+  });
+
+  // ========== Temp Bans ==========
+
+  // Get active temp bans
+  router.get('/guild/:guildId/temp-bans', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+
+    try {
+      const tempBans = db.prepare(
+        'SELECT * FROM temp_bans WHERE guild_id = ? AND unbanned = 0 ORDER BY unban_at ASC'
+      ).all(guildId);
+      res.json({ success: true, tempBans });
+    } catch (err) {
+      logger.error('Failed to fetch temp bans:', err);
+      res.status(500).json({ error: 'Failed to fetch temp bans' });
+    }
+  });
+
+  // Cancel a temp ban early (manual unban)
+  router.post('/guild/:guildId/temp-bans/:id/cancel', ensureGuildAccess, async (req, res) => {
+    const { guildId, id } = req.params;
+
+    try {
+      const tempBan = db.prepare(
+        'SELECT * FROM temp_bans WHERE id = ? AND guild_id = ? AND unbanned = 0'
+      ).get(id, guildId);
+
+      if (!tempBan) {
+        return res.status(404).json({ error: 'Temp ban not found or already cancelled' });
+      }
+
+      // Mark as unbanned in the database
+      db.prepare(
+        "UPDATE temp_bans SET unbanned = 1 WHERE id = ?"
+      ).run(id);
+
+      // Try to unban the user from the guild
+      try {
+        const guild = client.guilds.cache.get(guildId);
+        if (guild) {
+          await guild.bans.remove(tempBan.user_id, 'Temp ban cancelled via dashboard');
+        }
+      } catch (unbanErr) {
+        logger.warn(`Failed to unban user ${tempBan.user_id} from guild ${guildId}: ${unbanErr.message}`);
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to cancel temp ban:', err);
+      res.status(500).json({ error: 'Failed to cancel temp ban' });
+    }
+  });
+
+  // ========== Self-Role Panels (read-only) ==========
+
+  // Get self-role panels
+  router.get('/guild/:guildId/self-role-panels', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+
+    try {
+      const panels = db.prepare(
+        'SELECT * FROM self_role_panels WHERE guild_id = ? ORDER BY created_at DESC'
+      ).all(guildId);
+
+      // Attach role options to each panel
+      const getOptionsStmt = db.prepare(
+        'SELECT * FROM self_role_options WHERE panel_id = ?'
+      );
+
+      const result = panels.map(panel => ({
+        ...panel,
+        options: getOptionsStmt.all(panel.id),
+      }));
+
+      res.json({ success: true, panels: result });
+    } catch (err) {
+      logger.error('Failed to fetch self-role panels:', err);
+      res.status(500).json({ error: 'Failed to fetch self-role panels' });
+    }
+  });
+
+  // ========== Ban Appeals ==========
+
+  // Get recent ban appeals
+  router.get('/guild/:guildId/appeals', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 25;
+    const offset = (page - 1) * limit;
+
+    try {
+      const total = db.prepare(
+        'SELECT COUNT(*) as count FROM ban_appeals WHERE guild_id = ?'
+      ).get(guildId).count;
+
+      const appeals = db.prepare(
+        'SELECT * FROM ban_appeals WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+      ).all(guildId, limit, offset);
+
+      res.json({
+        success: true,
+        appeals,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (err) {
+      logger.error('Failed to fetch appeals:', err);
+      res.status(500).json({ error: 'Failed to fetch appeals' });
+    }
+  });
+
+  // ========== Filter Violations ==========
+
+  // Get paginated filter violations
+  router.get('/guild/:guildId/filter-violations', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 25;
+    const offset = (page - 1) * limit;
+
+    try {
+      const total = db.prepare(
+        'SELECT COUNT(*) as count FROM filter_violations WHERE guild_id = ?'
+      ).get(guildId).count;
+
+      const violations = db.prepare(
+        'SELECT * FROM filter_violations WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+      ).all(guildId, limit, offset);
+
+      res.json({
+        success: true,
+        violations,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (err) {
+      logger.error('Failed to fetch filter violations:', err);
+      res.status(500).json({ error: 'Failed to fetch filter violations' });
     }
   });
 
