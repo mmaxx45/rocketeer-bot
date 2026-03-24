@@ -24,6 +24,22 @@ const AUDIO_CONTENT_TYPES = [
 
 const AUDIO_EXTENSIONS = ['mp3', 'ogg', 'wav', 'flac', 'aac', 'm4a'];
 
+/** Map of dangerous MIME types to their corresponding file extensions for content-type blocking. */
+const BLOCKED_MIME_TO_EXTENSION = {
+  'application/x-msdownload': 'exe',
+  'application/x-msdos-program': 'exe',
+  'application/x-dosexec': 'exe',
+  'application/x-bat': 'bat',
+  'application/x-msi': 'msi',
+  'application/x-ms-shortcut': 'lnk',
+  'application/x-java-archive': 'jar',
+  'application/vnd.android.package-archive': 'apk',
+  'application/x-apple-diskimage': 'dmg',
+  'application/x-iso9660-image': 'iso',
+  'application/x-debian-package': 'deb',
+  'application/x-rpm': 'rpm',
+};
+
 /**
  * Returns the list of blocked extensions for a guild.
  * If the guild has custom blocked_extensions set, parse and return those.
@@ -78,23 +94,7 @@ function isBlockedByContentType(contentType, blockedExtensions) {
   if (!contentType || !blockedExtensions) return null;
 
   const lower = contentType.toLowerCase();
-  // Map common dangerous MIME types to extensions
-  const mimeToExt = {
-    'application/x-msdownload': 'exe',
-    'application/x-msdos-program': 'exe',
-    'application/x-dosexec': 'exe',
-    'application/x-bat': 'bat',
-    'application/x-msi': 'msi',
-    'application/x-ms-shortcut': 'lnk',
-    'application/x-java-archive': 'jar',
-    'application/vnd.android.package-archive': 'apk',
-    'application/x-apple-diskimage': 'dmg',
-    'application/x-iso9660-image': 'iso',
-    'application/x-debian-package': 'deb',
-    'application/x-rpm': 'rpm',
-  };
-
-  const mappedExt = mimeToExt[lower];
+  const mappedExt = BLOCKED_MIME_TO_EXTENSION[lower];
   if (mappedExt && blockedExtensions.includes(mappedExt)) {
     return mappedExt;
   }
@@ -201,6 +201,7 @@ module.exports = {
   VIDEO_EXTENSIONS,
   AUDIO_CONTENT_TYPES,
   AUDIO_EXTENSIONS,
+  BLOCKED_MIME_TO_EXTENSION,
   getBlockedExtensions,
   isBlockedFile,
   isBlockedByContentType,
