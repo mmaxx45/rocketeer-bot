@@ -557,10 +557,12 @@ module.exports = {
         : `<@${message.author.id}>, you have repeatedly crossposted the same message across multiple channels. This is an **official warning** (warning #${warningCount}). Continued violations may result in a ban.\nPlease review the channel list and post in the most appropriate channel moving forward.`;
 
       try {
-        await message.channel.send({
+        const sentMsg = await message.channel.send({
           content: repeatMsg,
           components: [row],
         });
+        // Auto-delete after 5 minutes
+        setTimeout(() => { sentMsg.delete().catch(() => {}); }, 5 * 60 * 1000);
       } catch (err) {
         logger.warn(`Failed to send warning message: ${err.message}`);
       }
@@ -570,10 +572,12 @@ module.exports = {
         if (bestMatch.channel_id !== message.channel.id) {
           const origChannel = await message.guild.channels.fetch(bestMatch.channel_id);
           if (origChannel) {
-            await origChannel.send({
+            const sentOrig = await origChannel.send({
               content: repeatMsg,
               components: [row],
             });
+            // Auto-delete after 5 minutes
+            setTimeout(() => { sentOrig.delete().catch(() => {}); }, 5 * 60 * 1000);
           }
         }
       } catch (err) {
@@ -665,9 +669,11 @@ module.exports = {
         : `<@${message.author.id}>, please do not crosspost the same message across multiple channels. Use the channel that best fits your topic. Duplicate messages have been removed.`;
 
       try {
-        await message.channel.send({
+        const sentFirst = await message.channel.send({
           content: firstMsg,
         });
+        // Auto-delete after 5 minutes
+        setTimeout(() => { sentFirst.delete().catch(() => {}); }, 5 * 60 * 1000);
       } catch (err) {
         logger.warn(`Failed to send notification message: ${err.message}`);
       }
