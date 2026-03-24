@@ -181,7 +181,6 @@ module.exports = function (client) {
         const pricesStr = typeof license_role_prices === 'string' ? license_role_prices : JSON.stringify(license_role_prices);
         updateSetting(guildId, 'license_role_prices', pricesStr || null);
       }
-<<<<<<< HEAD
       if (banned_domains !== undefined) {
         const raw = banned_domains.trim();
         if (!raw) {
