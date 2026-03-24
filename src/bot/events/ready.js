@@ -54,12 +54,10 @@ module.exports = {
       status: 'online',
     });
 
-    if (process.env.NODE_ENV !== 'production') {
-      try {
-        await registerCommands(client);
-      } catch (err) {
-        logger.error('Failed to register commands on startup:', err);
-      }
+    try {
+      await registerCommands(client);
+    } catch (err) {
+      logger.error('Failed to register commands on startup:', err);
     }
 
     // Start periodic temp ban expiry checker (every 60 seconds)

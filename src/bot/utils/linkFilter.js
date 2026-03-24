@@ -4,7 +4,7 @@
  * and "sub.badsite.com" will also match.
  */
 
-const URL_REGEX = /https?:\/\/([^\s<>)"']+)/gi;
+const URL_REGEX = /(?:https?:\/\/)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,})(?:[\/\s?#]|$)/gi;
 
 /**
  * Parse the banned_domains JSON string from settings into an array.
@@ -63,10 +63,9 @@ function domainMatches(hostname, bannedDomain) {
 function checkForBannedLinks(content, bannedDomains) {
   if (!content || !bannedDomains || bannedDomains.length === 0) return null;
 
-  const matches = content.matchAll(URL_REGEX);
+  const matches = content.toLowerCase().matchAll(URL_REGEX);
   for (const match of matches) {
-    const fullUrl = match[0];
-    const hostname = extractHostname(fullUrl);
+    const hostname = match[1]; // capture group is the domain
     if (!hostname) continue;
 
     for (const banned of bannedDomains) {

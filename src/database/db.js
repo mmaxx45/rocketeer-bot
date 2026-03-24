@@ -344,6 +344,12 @@ function runMigrations() {
     db.pragma('user_version = 20');
   }
 
+  if (version < 21) {
+    logger.info('Running database migration v21: add unbanned_at to temp_bans');
+    safeAddColumn('temp_bans', 'unbanned_at', 'TEXT DEFAULT NULL');
+    db.pragma('user_version = 21');
+  }
+
 
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
