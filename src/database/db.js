@@ -350,6 +350,46 @@ function runMigrations() {
     db.pragma('user_version = 21');
   }
 
+  if (version < 22) {
+    logger.info('Running database migration v22: giveaway system');
+    safeAddColumn('guild_settings', 'giveaway_host_role_id', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'giveaway_host_user_ids', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'giveaway_log_channel_id', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'giveaway_ping_role_id', 'TEXT DEFAULT NULL');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS giveaways (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        message_id TEXT,
+        host_id TEXT NOT NULL,
+        title TEXT DEFAULT '🎉 GIVEAWAY 🎉',
+        prize TEXT NOT NULL,
+        description TEXT,
+        color TEXT DEFAULT NULL,
+        winner_count INTEGER DEFAULT 1,
+        winners TEXT DEFAULT NULL,
+        ends_at TEXT NOT NULL,
+        ended INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_giveaways_guild ON giveaways(guild_id, ended);
+      CREATE INDEX IF NOT EXISTS idx_giveaways_expires ON giveaways(ended, ends_at);
+      CREATE INDEX IF NOT EXISTS idx_giveaways_channel ON giveaways(channel_id, ended);
+
+      CREATE TABLE IF NOT EXISTS giveaway_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        giveaway_id INTEGER NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        entered_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_giveaway_entries_unique ON giveaway_entries(giveaway_id, user_id);
+      CREATE INDEX IF NOT EXISTS idx_giveaway_entries_giveaway ON giveaway_entries(giveaway_id);
+    `);
+    db.pragma('user_version = 22');
+  }
 
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }

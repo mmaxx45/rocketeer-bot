@@ -70,6 +70,9 @@
       <a class="sidebar-nav-item" href="#section-appeals" data-section="section-appeals">
         <i class="bi bi-person-check"></i> Ban Appeals
       </a>
+      <a class="sidebar-nav-item" href="#section-giveaways" data-section="section-giveaways">
+        <i class="bi bi-gift"></i> Giveaways
+      </a>
       <a class="sidebar-nav-item" href="#section-warnreasons" data-section="section-warnreasons">
         <i class="bi bi-list-check"></i> Warning Reasons
       </a>
@@ -646,6 +649,145 @@
         </div>
       </div>
 
+      <!-- Giveaways Section -->
+      <div class="settings-section" id="section-giveaways">
+        <div class="section-header">
+          <i class="bi bi-gift"></i>
+          <h5>Giveaways</h5>
+        </div>
+        <div class="section-body">
+          <span class="setting-hint mb-3 d-block">Create and manage giveaways. Configure who can host giveaways and where results are logged.</span>
+
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Host Role</label>
+                <span class="setting-hint">Minimum role required to host giveaways (in addition to moderators).</span>
+                <select name="giveaway_host_role_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% roles.forEach(r => { %>
+                    <option value="<%= r.id %>" <%= settings.giveaway_host_role_id === r.id ? 'selected' : '' %>><%= r.name %></option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Log Channel</label>
+                <span class="setting-hint">Channel where giveaway results are logged.</span>
+                <select name="giveaway_log_channel_id" class="form-select">
+                  <option value="">-- Not set --</option>
+                  <% channels.forEach(ch => { %>
+                    <option value="<%= ch.id %>" <%= settings.giveaway_log_channel_id === ch.id ? 'selected' : '' %>>#<%= ch.name %></option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Ping Role</label>
+                <span class="setting-hint">Role to ping when a new giveaway starts (optional).</span>
+                <select name="giveaway_ping_role_id" class="form-select">
+                  <option value="">-- None --</option>
+                  <% roles.forEach(r => { %>
+                    <option value="<%= r.id %>" <%= settings.giveaway_ping_role_id === r.id ? 'selected' : '' %>><%= r.name %></option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Allowed Hosts</label>
+                <span class="setting-hint">Specific users allowed to host giveaways (by user ID).</span>
+                <div class="input-group mb-2">
+                  <input type="text" id="giveaway-host-input" class="form-control" placeholder="User ID">
+                  <button class="btn btn-outline-primary" type="button" onclick="addGiveawayHost('<%= guild.id %>')">Add</button>
+                </div>
+                <div id="giveaway-hosts-list" class="d-flex flex-wrap gap-1">
+                  <% const giveawayHosts = JSON.parse(settings.giveaway_host_user_ids || '[]'); %>
+                  <% giveawayHosts.forEach(uid => { %>
+                    <span class="badge bg-secondary d-flex align-items-center gap-1">
+                      <%= userMap && userMap[uid] ? userMap[uid] : uid %>
+                      <button type="button" class="btn-close btn-close-white btn-close-sm" onclick="removeGiveawayHost('<%= guild.id %>', '<%= uid %>', this)"></button>
+                    </span>
+                  <% }); %>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="my-4" style="border-color: var(--border-primary);">
+
+          <!-- Create Giveaway Form -->
+          <h6 class="mb-3"><i class="bi bi-plus-circle"></i> Create Giveaway</h6>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Channel</label>
+                <select id="giveaway-channel" class="form-select">
+                  <% channels.forEach(ch => { %>
+                    <option value="<%= ch.id %>">#<%= ch.name %></option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
+                <label class="setting-label">Prize</label>
+                <input type="text" id="giveaway-prize" class="form-control" placeholder="e.g. Nitro Classic" required>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4">
+              <div class="setting-item">
+                <label class="setting-label">Title</label>
+                <input type="text" id="giveaway-title" class="form-control" placeholder="🎉 GIVEAWAY 🎉">
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="setting-item">
+                <label class="setting-label">Duration</label>
+                <input type="text" id="giveaway-duration" class="form-control" placeholder="e.g. 1h, 2d, 30m">
+              </div>
+            </div>
+            <div class="col-md-2">
+              <div class="setting-item">
+                <label class="setting-label">Winners</label>
+                <input type="number" id="giveaway-winners" class="form-control" value="1" min="1" max="25">
+              </div>
+            </div>
+            <div class="col-md-2">
+              <div class="setting-item">
+                <label class="setting-label">Color</label>
+                <input type="color" id="giveaway-color" class="form-control form-control-color" value="#5865F2">
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-12">
+              <div class="setting-item">
+                <label class="setting-label">Description (optional)</label>
+                <textarea id="giveaway-description" class="form-control" rows="2" placeholder="Additional details about the giveaway..."></textarea>
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-primary mt-2" type="button" onclick="createGiveaway('<%= guild.id %>')">
+            <i class="bi bi-gift"></i> Create Giveaway
+          </button>
+
+          <hr class="my-4" style="border-color: var(--border-primary);">
+
+          <!-- Active Giveaways List -->
+          <h6 class="mb-3"><i class="bi bi-list-ul"></i> Giveaways</h6>
+          <div id="giveaways-container">
+            <div class="text-muted"><i class="bi bi-hourglass-split"></i> Loading giveaways...</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Warning Reasons Section -->
       <div class="settings-section" id="section-warnreasons">
         <div class="section-header">
@@ -871,6 +1013,7 @@ window.__guildEmojis = <%- JSON.stringify(emojis) %>;
 // Load self-role panels after dashboard.js is loaded
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof loadSelfRolePanels === 'function') loadSelfRolePanels('<%= guild.id %>');
+  if (typeof loadGiveaways === 'function') loadGiveaways('<%= guild.id %>');
 });
 </script>
 

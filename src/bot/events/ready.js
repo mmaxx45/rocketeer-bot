@@ -3,6 +3,8 @@ const config = require('../../config');
 const logger = require('../../logger');
 const { db } = require('../../database/db');
 const { getDueTempBans, markUnbanned } = require('../../database/tempbans');
+const { getExpiredGiveaways, getGiveaway } = require('../../database/giveaways');
+const { endGiveaway } = require('../commands/giveaway');
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
 
@@ -62,8 +64,11 @@ module.exports = {
 
     // Start periodic temp ban expiry checker (every 60 seconds)
     const tempBanInterval = setInterval(() => checkExpiredTempBans(client), 60 * 1000);
-    // Run once immediately on startup
     checkExpiredTempBans(client);
+
+    // Start periodic giveaway expiry checker (every 30 seconds)
+    const giveawayInterval = setInterval(() => checkExpiredGiveaways(client), 30 * 1000);
+    checkExpiredGiveaways(client);
 
   },
 };
@@ -127,6 +132,25 @@ async function checkExpiredTempBans(client) {
       logger.info(`Temp ban expired: unbanned user ${ban.user_id} in guild ${ban.guild_id}`);
     } catch (err) {
       logger.error(`Error processing expired temp ban ${ban.id}: ${err.message}`);
+    }
+  }
+}
+
+async function checkExpiredGiveaways(client) {
+  let expired;
+  try {
+    expired = getExpiredGiveaways();
+  } catch (err) {
+    logger.error(`Failed to fetch expired giveaways: ${err.message}`);
+    return;
+  }
+
+  for (const giveaway of expired) {
+    try {
+      await endGiveaway(client, giveaway);
+      logger.info(`Giveaway ${giveaway.id} auto-ended: prize=${giveaway.prize} guild=${giveaway.guild_id}`);
+    } catch (err) {
+      logger.error(`Error processing expired giveaway ${giveaway.id}: ${err.message}`);
     }
   }
 }

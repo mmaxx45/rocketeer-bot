@@ -531,6 +531,217 @@ async function deleteWarning(guildId, warningId) {
   }
 }
 
+// ===== Giveaway Management =====
+
+async function addGiveawayHost(guildId) {
+  const input = document.getElementById('giveaway-host-input');
+  const userId = input.value.trim();
+  if (!userId || !/^\d{17,20}$/.test(userId)) {
+    showToast('Please enter a valid user ID.', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/giveaway-hosts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, action: 'add' }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      const list = document.getElementById('giveaway-hosts-list');
+      const badge = document.createElement('span');
+      badge.className = 'badge bg-secondary d-flex align-items-center gap-1';
+      badge.innerHTML = `${escapeHtml(userId)} <button type="button" class="btn-close btn-close-white btn-close-sm" onclick="removeGiveawayHost('${guildId}', '${userId}', this)"></button>`;
+      list.appendChild(badge);
+      input.value = '';
+      showToast('Giveaway host added.');
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function removeGiveawayHost(guildId, userId, btn) {
+  try {
+    const res = await fetch(`/api/guild/${guildId}/giveaway-hosts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, action: 'remove' }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      btn.closest('.badge').remove();
+      showToast('Giveaway host removed.');
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function createGiveaway(guildId) {
+  const channelId = document.getElementById('giveaway-channel').value;
+  const prize = document.getElementById('giveaway-prize').value.trim();
+  const duration = document.getElementById('giveaway-duration').value.trim();
+  const title = document.getElementById('giveaway-title').value.trim() || null;
+  const description = document.getElementById('giveaway-description').value.trim() || null;
+  const winnerCount = parseInt(document.getElementById('giveaway-winners').value) || 1;
+  const color = document.getElementById('giveaway-color').value;
+
+  if (!prize || !duration) {
+    showToast('Prize and duration are required.', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/giveaways`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelId, prize, duration, title, description, winnerCount, color }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Giveaway created!');
+      document.getElementById('giveaway-prize').value = '';
+      document.getElementById('giveaway-duration').value = '';
+      document.getElementById('giveaway-title').value = '';
+      document.getElementById('giveaway-description').value = '';
+      document.getElementById('giveaway-winners').value = '1';
+      loadGiveaways(guildId);
+    } else {
+      showToast(result.error || 'Failed to create giveaway', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function loadGiveaways(guildId) {
+  const container = document.getElementById('giveaways-container');
+  if (!container) return;
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/giveaways`);
+    const result = await res.json();
+
+    if (!result.success) {
+      container.innerHTML = '<div class="text-danger">Failed to load giveaways</div>';
+      return;
+    }
+
+    if (result.giveaways.length === 0) {
+      container.innerHTML = '<div class="text-muted">No giveaways yet. Create one above!</div>';
+      return;
+    }
+
+    let html = '';
+    result.giveaways.forEach(g => {
+      const isActive = !g.ended;
+      const statusBadge = isActive
+        ? '<span class="badge bg-success">Active</span>'
+        : '<span class="badge bg-secondary">Ended</span>';
+      const endsAt = new Date(g.ends_at + 'Z');
+      const timeStr = isActive ? endsAt.toLocaleString() : 'Ended';
+
+      let actions = '';
+      if (isActive) {
+        actions += `<button class="btn btn-sm btn-outline-warning" onclick="endGiveaway('${guildId}', ${g.id})"><i class="bi bi-stop-circle"></i> End</button> `;
+      } else {
+        actions += `<button class="btn btn-sm btn-outline-info" onclick="rerollGiveaway('${guildId}', ${g.id})"><i class="bi bi-arrow-repeat"></i> Reroll</button> `;
+      }
+      actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteGiveaway('${guildId}', ${g.id})"><i class="bi bi-trash"></i></button>`;
+
+      const winners = g.winners ? JSON.parse(g.winners) : [];
+      const winnerText = winners.length > 0 ? winners.map(id => `<span class="text-success">${escapeHtml(id)}</span>`).join(', ') : '';
+
+      html += `
+        <div class="card mb-2" style="background: var(--bg-tertiary); border-color: var(--border-primary);">
+          <div class="card-body py-2 px-3">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <strong>${escapeHtml(g.title || '🎉 GIVEAWAY 🎉')}</strong> ${statusBadge}
+                <div class="small text-muted mt-1">
+                  <i class="bi bi-gift"></i> ${escapeHtml(g.prize)} &middot;
+                  <i class="bi bi-people"></i> ${g.entry_count} entries &middot;
+                  <i class="bi bi-trophy"></i> ${g.winner_count} winner(s) &middot;
+                  <i class="bi bi-clock"></i> ${timeStr}
+                </div>
+                ${winnerText ? `<div class="small mt-1"><i class="bi bi-trophy-fill text-warning"></i> Winners: ${winnerText}</div>` : ''}
+              </div>
+              <div class="d-flex gap-1">${actions}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = `<div class="text-danger">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function endGiveaway(guildId, giveawayId) {
+  if (!confirm('End this giveaway and pick winners?')) return;
+  try {
+    const res = await fetch(`/api/guild/${guildId}/giveaways/${giveawayId}/end`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Giveaway ended!');
+      loadGiveaways(guildId);
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function rerollGiveaway(guildId, giveawayId) {
+  if (!confirm('Reroll winners for this giveaway?')) return;
+  try {
+    const res = await fetch(`/api/guild/${guildId}/giveaways/${giveawayId}/reroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Winners rerolled!');
+      loadGiveaways(guildId);
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function deleteGiveaway(guildId, giveawayId) {
+  if (!confirm('Delete this giveaway? The Discord message will also be removed.')) return;
+  try {
+    const res = await fetch(`/api/guild/${guildId}/giveaways/${giveawayId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Giveaway deleted.');
+      loadGiveaways(guildId);
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
 // ===== Sidebar Navigation Scroll-Spy =====
 (function () {
   const sidebarItems = document.querySelectorAll('.sidebar-nav-item[data-section]');

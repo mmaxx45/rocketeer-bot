@@ -39,6 +39,10 @@ function getStmts() {
         appeal_category_id: db.prepare(`UPDATE guild_settings SET appeal_category_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         appeal_enabled: db.prepare(`UPDATE guild_settings SET appeal_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         server_invite_code: db.prepare(`UPDATE guild_settings SET server_invite_code = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        giveaway_host_role_id: db.prepare(`UPDATE guild_settings SET giveaway_host_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        giveaway_host_user_ids: db.prepare(`UPDATE guild_settings SET giveaway_host_user_ids = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        giveaway_log_channel_id: db.prepare(`UPDATE guild_settings SET giveaway_log_channel_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        giveaway_ping_role_id: db.prepare(`UPDATE guild_settings SET giveaway_ping_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }
@@ -136,6 +140,30 @@ function removeImageOnlyChannel(guildId, channelId) {
   return filtered;
 }
 
+function getGiveawayHostUsers(guildId) {
+  const settings = getSettings(guildId);
+  try {
+    return JSON.parse(settings.giveaway_host_user_ids || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function addGiveawayHostUser(guildId, userId) {
+  const users = getGiveawayHostUsers(guildId);
+  if (!users.includes(userId)) {
+    users.push(userId);
+    updateSetting(guildId, 'giveaway_host_user_ids', JSON.stringify(users));
+  }
+  return users;
+}
+
+function removeGiveawayHostUser(guildId, userId) {
+  const users = getGiveawayHostUsers(guildId);
+  const filtered = users.filter(id => id !== userId);
+  updateSetting(guildId, 'giveaway_host_user_ids', JSON.stringify(filtered));
+  return filtered;
+}
 
 module.exports = {
   getSettings,
@@ -149,4 +177,7 @@ module.exports = {
   getImageOnlyChannels,
   addImageOnlyChannel,
   removeImageOnlyChannel,
+  getGiveawayHostUsers,
+  addGiveawayHostUser,
+  removeGiveawayHostUser,
 };

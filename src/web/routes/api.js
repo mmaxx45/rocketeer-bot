@@ -1,6 +1,6 @@
 const express = require('express');
 const { ActivityType } = require('discord.js');
-const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, getBannedDomains, addBannedDomain, removeBannedDomain, getImageOnlyChannels, addImageOnlyChannel, removeImageOnlyChannel } = require('../../database/settings');
+const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, getBannedDomains, addBannedDomain, removeBannedDomain, getImageOnlyChannels, addImageOnlyChannel, removeImageOnlyChannel, getGiveawayHostUsers, addGiveawayHostUser, removeGiveawayHostUser } = require('../../database/settings');
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const logger = require('../../logger');
@@ -26,7 +26,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code, giveaway_host_role_id, giveaway_log_channel_id, giveaway_ping_role_id } = req.body;
 
     try {
       const warnings = [];
@@ -191,7 +191,15 @@ module.exports = function (client) {
         }
         updateSetting(guildId, 'server_invite_code', code || null);
       }
-
+      if (giveaway_host_role_id !== undefined) {
+        updateSetting(guildId, 'giveaway_host_role_id', giveaway_host_role_id || null);
+      }
+      if (giveaway_log_channel_id !== undefined) {
+        updateSetting(guildId, 'giveaway_log_channel_id', giveaway_log_channel_id || null);
+      }
+      if (giveaway_ping_role_id !== undefined) {
+        updateSetting(guildId, 'giveaway_ping_role_id', giveaway_ping_role_id || null);
+      }
 
       const settings = getSettings(guildId);
       res.json({ success: true, settings, warnings: warnings.length > 0 ? warnings : undefined });
@@ -877,6 +885,199 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to fetch filter violations:', err);
       res.status(500).json({ error: 'Failed to fetch filter violations' });
+    }
+  });
+
+  // ========== Giveaways ==========
+
+  const { createGiveaway, setMessageId, getAllForGuild, getGiveaway: getGiveawayById, deleteGiveaway, getEntryCount: giveawayEntryCount } = require('../../database/giveaways');
+  const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickWinners } = require('../../bot/commands/giveaway');
+  const { EmbedBuilder: GiveawayEmbed } = require('discord.js');
+  const { parseDuration, formatDuration } = require('../../bot/utils/parseDuration');
+
+  // List giveaways
+  router.get('/guild/:guildId/giveaways', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    try {
+      const giveaways = getAllForGuild(guildId).map(g => ({
+        ...g,
+        entry_count: giveawayEntryCount(g.id),
+      }));
+      res.json({ success: true, giveaways });
+    } catch (err) {
+      logger.error('Failed to fetch giveaways:', err);
+      res.status(500).json({ error: 'Failed to fetch giveaways' });
+    }
+  });
+
+  // Create giveaway
+  router.post('/guild/:guildId/giveaways', ensureGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const { channelId, title, prize, description, color, winnerCount, duration } = req.body;
+
+    if (!channelId || !prize || !duration) {
+      return res.status(400).json({ error: 'channelId, prize, and duration are required' });
+    }
+
+    const durationMs = parseDuration(duration);
+    if (!durationMs) {
+      return res.status(400).json({ error: 'Invalid duration. Examples: 30m, 1h, 2d' });
+    }
+
+    const endsAt = new Date(Date.now() + durationMs).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
+
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+      const giveaway = createGiveaway(
+        guildId, channelId, req.user.id,
+        title || '🎉 GIVEAWAY 🎉', prize, description || null,
+        color || null, parseInt(winnerCount) || 1, endsAt
+      );
+
+      const embed = buildGiveawayEmbed(giveaway, 0);
+      const components = buildGiveawayButtons(giveaway.id);
+
+      const settings = getSettings(guildId);
+      let pingContent = null;
+      if (settings.giveaway_ping_role_id) {
+        pingContent = `<@&${settings.giveaway_ping_role_id}>`;
+      }
+
+      const channel = await guild.channels.fetch(channelId);
+      const msg = await channel.send({ content: pingContent, embeds: [embed], components });
+      setMessageId(giveaway.id, msg.id);
+
+      logger.info(`Giveaway ${giveaway.id} created via dashboard by ${req.user.username}`);
+      res.json({ success: true, giveaway: { ...giveaway, message_id: msg.id, entry_count: 0 } });
+    } catch (err) {
+      logger.error('Failed to create giveaway:', err);
+      res.status(500).json({ error: 'Failed to create giveaway: ' + err.message });
+    }
+  });
+
+  // End giveaway
+  router.post('/guild/:guildId/giveaways/:id/end', ensureGuildAccess, async (req, res) => {
+    const giveaway = getGiveawayById(parseInt(req.params.id));
+    if (!giveaway || giveaway.guild_id !== req.params.guildId) {
+      return res.status(404).json({ error: 'Giveaway not found' });
+    }
+    if (giveaway.ended) {
+      return res.status(400).json({ error: 'Giveaway already ended' });
+    }
+
+    try {
+      const winners = await endGiveaway(client, giveaway);
+      logger.info(`Giveaway ${giveaway.id} ended via dashboard by ${req.user.username}`);
+      res.json({ success: true, winners });
+    } catch (err) {
+      logger.error('Failed to end giveaway:', err);
+      res.status(500).json({ error: 'Failed to end giveaway' });
+    }
+  });
+
+  // Reroll giveaway
+  router.post('/guild/:guildId/giveaways/:id/reroll', ensureGuildAccess, async (req, res) => {
+    const { getEntries, markEnded: markGiveawayEnded } = require('../../database/giveaways');
+    const giveaway = getGiveawayById(parseInt(req.params.id));
+    if (!giveaway || giveaway.guild_id !== req.params.guildId) {
+      return res.status(404).json({ error: 'Giveaway not found' });
+    }
+    if (!giveaway.ended) {
+      return res.status(400).json({ error: 'Giveaway has not ended yet' });
+    }
+
+    try {
+      const entries = getEntries(giveaway.id);
+      if (entries.length === 0) {
+        return res.status(400).json({ error: 'No entries to reroll' });
+      }
+
+      const newWinners = pickWinners(entries, giveaway.winner_count);
+      const winnerMentions = newWinners.map(id => `<@${id}>`);
+      markGiveawayEnded(giveaway.id, JSON.stringify(newWinners));
+
+      // Update Discord message
+      const guild = client.guilds.cache.get(giveaway.guild_id);
+      if (guild) {
+        try {
+          const channel = await guild.channels.fetch(giveaway.channel_id);
+          if (channel) {
+            const message = await channel.messages.fetch(giveaway.message_id);
+            if (message) {
+              const { buildEndedEmbed } = require('../../bot/commands/giveaway');
+              await message.edit({
+                embeds: [buildEndedEmbed(giveaway, winnerMentions)],
+                components: buildGiveawayButtons(giveaway.id, true),
+              });
+            }
+            await channel.send(`🎉 New winners rerolled for **${giveaway.prize}**: ${winnerMentions.join(', ')}! Congratulations!`);
+          }
+        } catch (err) {
+          logger.warn(`Failed to update rerolled giveaway message: ${err.message}`);
+        }
+      }
+
+      logger.info(`Giveaway ${giveaway.id} rerolled via dashboard by ${req.user.username}`);
+      res.json({ success: true, winners: newWinners });
+    } catch (err) {
+      logger.error('Failed to reroll giveaway:', err);
+      res.status(500).json({ error: 'Failed to reroll giveaway' });
+    }
+  });
+
+  // Delete giveaway
+  router.delete('/guild/:guildId/giveaways/:id', ensureGuildAccess, async (req, res) => {
+    const giveaway = getGiveawayById(parseInt(req.params.id));
+    if (!giveaway || giveaway.guild_id !== req.params.guildId) {
+      return res.status(404).json({ error: 'Giveaway not found' });
+    }
+
+    try {
+      // Try to delete Discord message
+      const guild = client.guilds.cache.get(giveaway.guild_id);
+      if (guild && giveaway.message_id) {
+        try {
+          const channel = await guild.channels.fetch(giveaway.channel_id);
+          if (channel) {
+            const message = await channel.messages.fetch(giveaway.message_id);
+            if (message) await message.delete();
+          }
+        } catch { /* message may already be gone */ }
+      }
+
+      deleteGiveaway(giveaway.id);
+      logger.info(`Giveaway ${giveaway.id} deleted via dashboard by ${req.user.username}`);
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to delete giveaway:', err);
+      res.status(500).json({ error: 'Failed to delete giveaway' });
+    }
+  });
+
+  // Giveaway host users
+  router.post('/guild/:guildId/giveaway-hosts', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const { userId, action } = req.body;
+
+    if (!userId || !action) {
+      return res.status(400).json({ error: 'userId and action are required' });
+    }
+
+    try {
+      let users;
+      if (action === 'add') {
+        users = addGiveawayHostUser(guildId, userId);
+      } else if (action === 'remove') {
+        users = removeGiveawayHostUser(guildId, userId);
+      } else {
+        return res.status(400).json({ error: 'action must be add or remove' });
+      }
+      res.json({ success: true, users });
+    } catch (err) {
+      logger.error('Failed to update giveaway hosts:', err);
+      res.status(500).json({ error: 'Failed to update giveaway hosts' });
     }
   });
 

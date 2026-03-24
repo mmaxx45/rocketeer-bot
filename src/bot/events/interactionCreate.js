@@ -11,6 +11,8 @@ const { getOpenThreadByChannel, closeThread } = require('../../database/modmail'
 const { getRoleOptions } = require('../../database/selfRoles');
 const { addTempBan } = require('../../database/tempbans');
 const { getAppealById, getAppealByChannel, resolveAppeal } = require('../../database/appeals');
+const { getGiveaway, hasEntry, addEntry, removeEntry, getEntryCount } = require('../../database/giveaways');
+const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway } = require('../commands/giveaway');
 
 const DEFAULT_WARN_REASONS = [
   'Spam or flooding',
@@ -849,6 +851,72 @@ async function handleButton(interaction) {
     }
     return;
   }
+
+  // ─── Giveaway Handlers ───
+
+  if (action === 'giveaway_enter') {
+    const giveawayId = parseInt(params[0], 10);
+    if (isNaN(giveawayId)) {
+      return interaction.reply({ content: 'Invalid giveaway.', flags: MessageFlags.Ephemeral });
+    }
+
+    const giveaway = getGiveaway(giveawayId);
+    if (!giveaway || giveaway.ended) {
+      return interaction.reply({ content: 'This giveaway has ended.', flags: MessageFlags.Ephemeral });
+    }
+
+    const alreadyEntered = hasEntry(giveawayId, interaction.user.id);
+
+    if (alreadyEntered) {
+      removeEntry(giveawayId, interaction.user.id);
+      const count = getEntryCount(giveawayId);
+      // Update embed entry count
+      try {
+        await interaction.update({
+          embeds: [buildGiveawayEmbed(giveaway, count)],
+          components: buildGiveawayButtons(giveawayId),
+        });
+      } catch {
+        // If update fails, just reply
+      }
+      return interaction.followUp({ content: `You left the giveaway for **${giveaway.prize}**.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+    } else {
+      addEntry(giveawayId, interaction.user.id);
+      const count = getEntryCount(giveawayId);
+      try {
+        await interaction.update({
+          embeds: [buildGiveawayEmbed(giveaway, count)],
+          components: buildGiveawayButtons(giveawayId),
+        });
+      } catch {
+        // If update fails, just reply
+      }
+      return interaction.followUp({ content: `🎉 You entered the giveaway for **${giveaway.prize}**! Good luck!`, flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+  }
+
+  if (action === 'giveaway_end_select') {
+    // This is handled by the select menu below
+    return;
+  }
+}
+
+async function handleSelectMenu(interaction) {
+  if (!interaction.isStringSelectMenu()) return;
+
+  if (interaction.customId === 'giveaway_end_select') {
+    const giveawayId = parseInt(interaction.values[0], 10);
+    const giveaway = getGiveaway(giveawayId);
+    if (!giveaway || giveaway.ended) {
+      return interaction.update({ content: 'This giveaway has already ended.', components: [] });
+    }
+
+    await interaction.update({ content: 'Ending giveaway...', components: [] });
+    const winners = await endGiveaway(interaction.client, giveaway);
+    const winnerText = winners.length > 0 ? winners.map(id => `<@${id}>`).join(', ') : 'No entries';
+    await interaction.editReply(`Giveaway for **${giveaway.prize}** ended! Winners: ${winnerText}`);
+    return;
+  }
 }
 
 async function handleCommand(interaction) {
@@ -1125,6 +1193,9 @@ module.exports = {
       }
       if (interaction.isModalSubmit()) {
         return await handleModalSubmit(interaction);
+      }
+      if (interaction.isStringSelectMenu()) {
+        return await handleSelectMenu(interaction);
       }
     } catch (err) {
       logger.error(`Unhandled interaction error (${interaction.type}):`, err);
