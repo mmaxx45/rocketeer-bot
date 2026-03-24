@@ -43,6 +43,9 @@ function getStmts() {
         soft_slur_threshold: db.prepare(`UPDATE guild_settings SET soft_slur_threshold = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         soft_slur_window_minutes: db.prepare(`UPDATE guild_settings SET soft_slur_window_minutes = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         image_only_channels: db.prepare(`UPDATE guild_settings SET image_only_channels = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        appeal_category_id: db.prepare(`UPDATE guild_settings SET appeal_category_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        appeal_enabled: db.prepare(`UPDATE guild_settings SET appeal_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        server_invite_code: db.prepare(`UPDATE guild_settings SET server_invite_code = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }
