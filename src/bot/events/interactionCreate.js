@@ -13,6 +13,7 @@ const { getOpenThreadByChannel, closeThread } = require('../../database/modmail'
 const { createTicket, getOpenTicketByUser, getOpenTicketByChannel, closeTicket } = require('../../database/tickets');
 const { getRoleOptions } = require('../../database/selfRoles');
 const { addTempBan } = require('../../database/tempbans');
+const { createAppeal, getOpenAppeal, getAppealById, getAppealByChannel, resolveAppeal } = require('../../database/appeals');
 
 const DEFAULT_WARN_REASONS = [
   'Spam or flooding',
@@ -100,6 +101,34 @@ async function handleButton(interaction) {
     }
 
     try {
+      // DM the banned user BEFORE banning (after ban, bot and user share no guilds)
+      try {
+        const targetUser = await interaction.client.users.fetch(pending.targetId);
+        const dmEmbed = new EmbedBuilder()
+          .setTitle('You have been banned')
+          .setColor(0xFF0000)
+          .setDescription(`You have been banned from **${interaction.guild.name}**.`)
+          .addFields(
+            { name: 'Reason', value: pending.reason || 'No reason provided' },
+            { name: 'Expires', value: 'Never' },
+          )
+          .setTimestamp();
+
+        const dmComponents = [];
+        if (settings.appeal_enabled && settings.appeal_category_id) {
+          dmComponents.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`ban_appeal:${interaction.guild.id}`)
+              .setLabel('Appeal Ban')
+              .setStyle(ButtonStyle.Primary),
+          ));
+        }
+
+        await targetUser.send({ embeds: [dmEmbed], components: dmComponents });
+      } catch (err) {
+        logger.warn(`Failed to DM banned user: ${err.message}`);
+      }
+
       try {
         const member = await interaction.guild.members.fetch(pending.targetId);
         await member.ban({ reason: `Banned by ${interaction.user.username}: ${pending.reason}` });
@@ -289,6 +318,41 @@ async function handleButton(interaction) {
     }
 
     try {
+      // DM the banned user BEFORE banning (after ban, bot and user share no guilds)
+      try {
+        const targetUser = await interaction.client.users.fetch(pending.targetId);
+        const dmEmbed = new EmbedBuilder()
+          .setTitle('You have been banned')
+          .setColor(0xFF0000)
+          .setDescription(`You have been banned from **${interaction.guild.name}**.`)
+          .addFields(
+            { name: 'Reason', value: pending.reason || 'No reason provided' },
+            { name: 'Expires', value: 'Never' },
+          )
+          .setTimestamp();
+
+        const dmComponents = [];
+        if (banSettings.appeal_enabled && banSettings.appeal_category_id) {
+          dmComponents.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`ban_appeal:${interaction.guild.id}`)
+              .setLabel('Appeal Ban')
+              .setStyle(ButtonStyle.Primary),
+          ));
+        }
+
+        if (banSettings.server_invite_code) {
+          dmEmbed.addFields({
+            name: 'Rejoin After Ban',
+            value: `If your ban is lifted, you can rejoin using: https://discord.gg/${banSettings.server_invite_code}`,
+          });
+        }
+
+        await targetUser.send({ embeds: [dmEmbed], components: dmComponents });
+      } catch (err) {
+        logger.warn(`Failed to DM banned user: ${err.message}`);
+      }
+
       const deleteMessageSeconds = (pending.deleteMessageDays || 0) * 86400;
       try {
         const member = await interaction.guild.members.fetch(pending.targetId);
@@ -1116,6 +1180,325 @@ async function handleButton(interaction) {
       embeds: [embed],
       components,
     });
+    return;
+  }
+
+  // ─── Ban Appeal Handlers ───
+
+  if (action === 'ban_appeal') {
+    const guildId = params[0];
+    if (!guildId) {
+      return interaction.reply({ content: 'Invalid appeal request.', flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    try {
+      const guild = await interaction.client.guilds.fetch(guildId);
+      if (!guild) {
+        return interaction.editReply({ content: 'Could not find that server.' });
+      }
+
+      const appealSettings = getSettings(guildId);
+      if (!appealSettings.appeal_enabled || !appealSettings.appeal_category_id) {
+        return interaction.editReply({ content: 'Ban appeals are not enabled on that server.' });
+      }
+
+      // Check if user is actually banned
+      try {
+        await guild.bans.fetch(interaction.user.id);
+      } catch {
+        return interaction.editReply({ content: 'You are not currently banned from that server.' });
+      }
+
+      // Check for existing open appeal
+      const existingAppeal = getOpenAppeal(guildId, interaction.user.id);
+      if (existingAppeal) {
+        return interaction.editReply({ content: 'You already have a pending appeal for that server. Please wait for a moderator to review it.' });
+      }
+
+      // Get the ban reason from the guild
+      let banReason = 'No reason provided';
+      try {
+        const banInfo = await guild.bans.fetch(interaction.user.id);
+        if (banInfo.reason) banReason = banInfo.reason;
+      } catch {
+        // Could not fetch ban info
+      }
+
+      const { ChannelType, PermissionFlagsBits: Perms } = require('discord.js');
+
+      // Build permission overwrites for the appeal channel
+      const overwrites = [
+        { id: guild.roles.everyone.id, deny: [Perms.ViewChannel] },
+        { id: interaction.client.user.id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ManageChannels, Perms.ManageMessages] },
+      ];
+
+      if (appealSettings.moderator_role_id) {
+        overwrites.push({ id: appealSettings.moderator_role_id, allow: [Perms.ViewChannel, Perms.SendMessages, Perms.ReadMessageHistory] });
+      }
+
+      const channel = await guild.channels.create({
+        name: `appeal-${interaction.user.username}`.slice(0, 100),
+        type: ChannelType.GuildText,
+        parent: appealSettings.appeal_category_id,
+        permissionOverwrites: overwrites,
+      });
+
+      // Record appeal in database
+      const appealId = createAppeal(guildId, interaction.user.id, channel.id, banReason);
+
+      // Build the appeal info embed
+      const accountCreated = interaction.user.createdAt;
+      const appealEmbed = new EmbedBuilder()
+        .setTitle('Ban Appeal')
+        .setColor(0xFFA500)
+        .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 128 }))
+        .addFields(
+          { name: 'User', value: `${interaction.user.username} (${interaction.user.id})`, inline: true },
+          { name: 'Account Created', value: `<t:${Math.floor(accountCreated.getTime() / 1000)}:R>`, inline: true },
+          { name: 'Ban Reason', value: banReason },
+        )
+        .setTimestamp();
+
+      const appealRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`appeal_accept:${appealId}`)
+          .setLabel('Accept (Unban)')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`appeal_reject:${appealId}`)
+          .setLabel('Reject')
+          .setStyle(ButtonStyle.Danger),
+      );
+
+      await channel.send({ embeds: [appealEmbed], components: [appealRow] });
+
+      // Ping the moderator role
+      if (appealSettings.moderator_role_id) {
+        await channel.send({
+          content: `<@&${appealSettings.moderator_role_id}> — A new ban appeal has been submitted.`,
+          allowedMentions: { roles: [appealSettings.moderator_role_id] },
+        });
+      }
+
+      // Disable the appeal button in the DM message
+      try {
+        const disabledRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`ban_appeal:${guildId}`)
+            .setLabel('Appeal Submitted')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(true),
+        );
+        await interaction.message.edit({ components: [disabledRow] });
+      } catch {
+        // May fail if message is too old
+      }
+
+      await interaction.editReply({ content: 'Your ban appeal has been submitted. A moderator will review it shortly.' });
+      logger.info(`Ban appeal created: user=${interaction.user.username} guild=${guild.name} appealId=${appealId}`);
+    } catch (err) {
+      logger.error(`Failed to create ban appeal: ${err.message}`);
+      await interaction.editReply({ content: `Failed to submit appeal: ${err.message}` });
+    }
+    return;
+  }
+
+  if (action === 'appeal_accept') {
+    const appealId = parseInt(params[0], 10);
+    if (isNaN(appealId)) {
+      return interaction.reply({ content: 'Invalid appeal.', flags: MessageFlags.Ephemeral });
+    }
+
+    const appeal = getAppealById(appealId);
+    if (!appeal) {
+      return interaction.reply({ content: 'This appeal no longer exists.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (appeal.status !== 'pending') {
+      return interaction.reply({ content: `This appeal has already been ${appeal.status}.`, flags: MessageFlags.Ephemeral });
+    }
+
+    // Check moderator permissions
+    const appealSettings = getSettings(appeal.guild_id);
+    if (!isModerator(interaction.member, appealSettings)) {
+      return interaction.reply({ content: 'Only moderators can handle appeals.', flags: MessageFlags.Ephemeral });
+    }
+
+    try {
+      // Unban the user
+      await interaction.guild.bans.remove(appeal.user_id, `Appeal accepted by ${interaction.user.username}`);
+
+      // Update database
+      resolveAppeal(appealId, interaction.user.id, 'accepted');
+
+      try {
+        addModAction(appeal.guild_id, interaction.user.id, 'appeal_accept', appeal.user_id, `Ban appeal accepted`);
+      } catch (err) {
+        logger.warn(`Failed to log appeal accept mod action: ${err.message}`);
+      }
+
+      // DM the user
+      try {
+        const user = await interaction.client.users.fetch(appeal.user_id);
+        const dmEmbed = new EmbedBuilder()
+          .setTitle('Ban Appeal Accepted')
+          .setColor(0x2ECC71)
+          .setDescription(`Your ban appeal for **${interaction.guild.name}** has been accepted. You have been unbanned.`)
+          .setTimestamp();
+
+        if (appealSettings.server_invite_code) {
+          dmEmbed.addFields({
+            name: 'Rejoin',
+            value: `You can rejoin using: https://discord.gg/${appealSettings.server_invite_code}`,
+          });
+        }
+
+        await user.send({ embeds: [dmEmbed] });
+      } catch (err) {
+        logger.warn(`Failed to DM user about appeal acceptance: ${err.message}`);
+      }
+
+      // Log to ban log channel
+      if (appealSettings.ban_log_channel_id) {
+        try {
+          const logChannel = await interaction.guild.channels.fetch(appealSettings.ban_log_channel_id);
+          if (logChannel) {
+            const logEmbed = new EmbedBuilder()
+              .setTitle('Ban Appeal Accepted')
+              .setColor(0x2ECC71)
+              .addFields(
+                { name: 'User', value: `<@${appeal.user_id}> (${appeal.user_id})`, inline: true },
+                { name: 'Accepted by', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'Original Ban Reason', value: appeal.reason || 'No reason provided' },
+              )
+              .setTimestamp();
+            await logChannel.send({ embeds: [logEmbed] });
+          }
+        } catch (err) {
+          logger.warn(`Failed to log appeal acceptance: ${err.message}`);
+        }
+      }
+
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('Appeal Accepted')
+            .setDescription(`This appeal was accepted by <@${interaction.user.id}>. The user has been unbanned.\nThis channel will be deleted in 5 seconds.`)
+            .setColor(0x2ECC71)
+            .setTimestamp(),
+        ],
+        components: [],
+      });
+
+      // Delete channel after 5 seconds
+      setTimeout(async () => {
+        try {
+          await interaction.channel.delete('Appeal accepted');
+        } catch (err) {
+          logger.warn(`Failed to delete appeal channel: ${err.message}`);
+        }
+      }, 5000);
+
+      logger.info(`Appeal accepted: appealId=${appealId} user=${appeal.user_id} moderator=${interaction.user.username}`);
+    } catch (err) {
+      logger.error(`Failed to accept appeal: ${err.message}`);
+      await interaction.reply({ content: `Failed to accept appeal: ${err.message}`, flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  if (action === 'appeal_reject') {
+    const appealId = parseInt(params[0], 10);
+    if (isNaN(appealId)) {
+      return interaction.reply({ content: 'Invalid appeal.', flags: MessageFlags.Ephemeral });
+    }
+
+    const appeal = getAppealById(appealId);
+    if (!appeal) {
+      return interaction.reply({ content: 'This appeal no longer exists.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (appeal.status !== 'pending') {
+      return interaction.reply({ content: `This appeal has already been ${appeal.status}.`, flags: MessageFlags.Ephemeral });
+    }
+
+    // Check moderator permissions
+    const appealSettings = getSettings(appeal.guild_id);
+    if (!isModerator(interaction.member, appealSettings)) {
+      return interaction.reply({ content: 'Only moderators can handle appeals.', flags: MessageFlags.Ephemeral });
+    }
+
+    try {
+      // Update database
+      resolveAppeal(appealId, interaction.user.id, 'rejected');
+
+      try {
+        addModAction(appeal.guild_id, interaction.user.id, 'appeal_reject', appeal.user_id, `Ban appeal rejected`);
+      } catch (err) {
+        logger.warn(`Failed to log appeal reject mod action: ${err.message}`);
+      }
+
+      // DM the user
+      try {
+        const user = await interaction.client.users.fetch(appeal.user_id);
+        const dmEmbed = new EmbedBuilder()
+          .setTitle('Ban Appeal Rejected')
+          .setColor(0xE74C3C)
+          .setDescription(`Your ban appeal for **${interaction.guild.name}** has been rejected.`)
+          .setTimestamp();
+        await user.send({ embeds: [dmEmbed] });
+      } catch (err) {
+        logger.warn(`Failed to DM user about appeal rejection: ${err.message}`);
+      }
+
+      // Log to ban log channel
+      if (appealSettings.ban_log_channel_id) {
+        try {
+          const logChannel = await interaction.guild.channels.fetch(appealSettings.ban_log_channel_id);
+          if (logChannel) {
+            const logEmbed = new EmbedBuilder()
+              .setTitle('Ban Appeal Rejected')
+              .setColor(0xE74C3C)
+              .addFields(
+                { name: 'User', value: `<@${appeal.user_id}> (${appeal.user_id})`, inline: true },
+                { name: 'Rejected by', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'Original Ban Reason', value: appeal.reason || 'No reason provided' },
+              )
+              .setTimestamp();
+            await logChannel.send({ embeds: [logEmbed] });
+          }
+        } catch (err) {
+          logger.warn(`Failed to log appeal rejection: ${err.message}`);
+        }
+      }
+
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('Appeal Rejected')
+            .setDescription(`This appeal was rejected by <@${interaction.user.id}>.\nThis channel will be deleted in 5 seconds.`)
+            .setColor(0xE74C3C)
+            .setTimestamp(),
+        ],
+        components: [],
+      });
+
+      // Delete channel after 5 seconds
+      setTimeout(async () => {
+        try {
+          await interaction.channel.delete('Appeal rejected');
+        } catch (err) {
+          logger.warn(`Failed to delete appeal channel: ${err.message}`);
+        }
+      }, 5000);
+
+      logger.info(`Appeal rejected: appealId=${appealId} user=${appeal.user_id} moderator=${interaction.user.username}`);
+    } catch (err) {
+      logger.error(`Failed to reject appeal: ${err.message}`);
+      await interaction.reply({ content: `Failed to reject appeal: ${err.message}`, flags: MessageFlags.Ephemeral });
+    }
     return;
   }
 }

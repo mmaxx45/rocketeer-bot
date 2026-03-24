@@ -51,7 +51,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id, ticket_open_message, license_role_prices, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id, ticket_open_message, license_role_prices, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -209,6 +209,20 @@ module.exports = function (client) {
         // Accepts JSON string or array
         const channelsStr = typeof image_only_channels === 'string' ? image_only_channels : JSON.stringify(image_only_channels);
         updateSetting(guildId, 'image_only_channels', channelsStr || null);
+      }
+      if (appeal_category_id !== undefined) {
+        updateSetting(guildId, 'appeal_category_id', appeal_category_id || null);
+      }
+      if (appeal_enabled !== undefined) {
+        updateSetting(guildId, 'appeal_enabled', appeal_enabled === 'on' || appeal_enabled === true || appeal_enabled === '1' ? 1 : 0);
+      }
+      if (server_invite_code !== undefined) {
+        // Strip full URL if provided, just store the code
+        let code = (server_invite_code || '').trim();
+        if (code.includes('discord.gg/')) {
+          code = code.split('discord.gg/').pop().split(/[?\s]/)[0];
+        }
+        updateSetting(guildId, 'server_invite_code', code || null);
       }
 
       const settings = getSettings(guildId);

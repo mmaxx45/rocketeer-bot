@@ -319,6 +319,32 @@ function runMigrations() {
     db.pragma('user_version = 19');
   }
 
+  if (version < 20) {
+    logger.info('Running database migration v20: ban appeals system');
+    safeAddColumn('guild_settings', 'appeal_category_id', 'TEXT DEFAULT NULL');
+    safeAddColumn('guild_settings', 'appeal_enabled', 'INTEGER DEFAULT 0');
+    safeAddColumn('guild_settings', 'server_invite_code', 'TEXT DEFAULT NULL');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ban_appeals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        channel_id TEXT,
+        reason TEXT,
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')),
+        moderator_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        resolved_at TEXT DEFAULT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ban_appeals_guild_user ON ban_appeals(guild_id, user_id);
+      CREATE INDEX IF NOT EXISTS idx_ban_appeals_channel ON ban_appeals(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_ban_appeals_status ON ban_appeals(guild_id, status);
+    `);
+    db.pragma('user_version = 20');
+  }
+
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 
