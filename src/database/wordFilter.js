@@ -17,6 +17,7 @@ function getStmts() {
       `),
       getViolations: db.prepare(`SELECT * FROM filter_violations WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`),
       getViolationsCount: db.prepare(`SELECT COUNT(*) as count FROM filter_violations WHERE guild_id = ?`),
+      removeWordById: db.prepare(`DELETE FROM word_filter WHERE guild_id = ? AND id = ?`),
     };
   }
   return stmts;
@@ -31,8 +32,7 @@ function removeFilterWord(guildId, word) {
 }
 
 function removeFilterWordById(guildId, id) {
-  const { db } = require('./db');
-  return db.prepare('DELETE FROM word_filter WHERE guild_id = ? AND id = ?').run(guildId, id);
+  return getStmts().removeWordById.run(guildId, id);
 }
 
 function getFilterWords(guildId) {

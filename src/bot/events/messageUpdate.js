@@ -3,8 +3,10 @@ const { getSettings } = require('../../database/settings');
 const { addWarning, getWarningCount } = require('../../database/warnings');
 const { addModAction } = require('../../database/modactions');
 const { isExempt } = require('../utils/permissions');
+const { getExemptChannels } = require('../../database/settings');
 const { checkMessage } = require('../utils/wordFilter');
 const { getFilterWords, addFilterViolation, getRecentViolations } = require('../../database/wordFilter');
+const { parseBannedDomains, checkForBannedLinks } = require('../utils/linkFilter');
 const { EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -37,8 +39,6 @@ module.exports = {
     const guildId = newMessage.guild.id;
     const settings = getSettings(guildId);
 
-    if (!settings.filter_enabled) return;
-
     // Fetch member for exempt check
     let member = newMessage.member;
     if (!member) {
@@ -50,6 +50,50 @@ module.exports = {
     }
 
     if (isExempt(member, settings)) return;
+
+    // Check exempt channels
+    const exemptChannels = getExemptChannels(guildId);
+    if (exemptChannels.includes(newMessage.channel.id)) return;
+
+    // Check for banned links in edited message
+    const bannedDomains = parseBannedDomains(settings.banned_domains);
+    if (bannedDomains.length > 0) {
+      const matchedDomain = checkForBannedLinks(newMessage.content, bannedDomains);
+      if (matchedDomain) {
+        logger.info(`Banned link detected in edit: user=${newMessage.author.username} guild=${guildId} domain=${matchedDomain}`);
+        try {
+          await newMessage.delete();
+        } catch (err) {
+          logger.warn(`Failed to delete edited message with banned link: ${err.message}`);
+        }
+        if (settings.warn_log_channel_id) {
+          try {
+            const logChannel = await newMessage.guild.channels.fetch(settings.warn_log_channel_id);
+            if (logChannel) {
+              await logChannel.send({
+                embeds: [
+                  new EmbedBuilder()
+                    .setTitle('Banned Link Deleted (Edit)')
+                    .setColor(0xFF4444)
+                    .addFields(
+                      { name: 'User', value: `<@${newMessage.author.id}> (${newMessage.author.id})`, inline: true },
+                      { name: 'Channel', value: `<#${newMessage.channel.id}>`, inline: true },
+                      { name: 'Matched Domain', value: matchedDomain, inline: true },
+                    )
+                    .setTimestamp(),
+                ],
+              });
+            }
+          } catch (err) {
+            logger.warn(`Failed to log banned link edit: ${err.message}`);
+          }
+        }
+        return;
+      }
+    }
+
+    // Word filter
+    if (!settings.filter_enabled) return;
 
     const filterWords = getFilterWords(guildId);
     if (filterWords.length === 0) return;

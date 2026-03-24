@@ -5,7 +5,7 @@ const { cacheMessage, getRecentMessages, deleteMessage } = require('../../databa
 const { addWarning, getWarningCount } = require('../../database/warnings');
 const { addModAction } = require('../../database/modactions');
 const { getSimilarity, normalizeMessage, MIN_MESSAGE_LENGTH } = require('../utils/similarity');
-const { isExempt } = require('../utils/permissions');
+const { isExempt, isModerator } = require('../utils/permissions');
 const { getBlockedExtensions, isBlockedFile, isBlockedByContentType, isImageAttachment, hasMediaAttachments, getMediaType } = require('../utils/fileFilter');
 const { parseBannedDomains, checkForBannedLinks } = require('../utils/linkFilter');
 const { checkMessage } = require('../utils/wordFilter');
@@ -282,6 +282,10 @@ async function handleDM(message) {
 async function handleModmailReply(message) {
   const thread = getOpenThreadByChannel(message.channel.id);
   if (!thread) return false;
+
+  // Only moderators should relay messages to the user
+  const modSettings = getSettings(message.guild.id);
+  if (!isModerator(message.member, modSettings)) return true; // Absorb but don't relay
 
   // This is a modmail channel - relay the mod's message to the user
   try {

@@ -245,13 +245,6 @@
 </div>
 
 <script>
-function copyId(el, id) {
-  navigator.clipboard.writeText(id).then(() => {
-    const orig = el.textContent;
-    el.textContent = 'Copied!';
-    setTimeout(() => { el.textContent = orig; }, 1500);
-  });
-}
 (function () {
   const guildId = '<%= guild.id %>';
   const canvas = document.getElementById('warnings-chart');
@@ -370,10 +363,11 @@ function copyId(el, id) {
   </div>
 </div>
 
+<script type="application/json" id="usermap-data"><%- JSON.stringify(userMap).replace(/<\//g, '<\\/') %></script>
 <script>
 (function () {
   const guildId = '<%= guild.id %>';
-  const userMap = JSON.parse('<%= JSON.stringify(userMap).replace(/\\\\/g, "\\\\\\\\").replace(/\'/g, "\\\\'").replace(/<\\//g, "<\\\\/") %>');
+  const userMap = JSON.parse(document.getElementById('usermap-data').textContent);
   const botId = '<%= botId %>';
   let detailModal = null;
 

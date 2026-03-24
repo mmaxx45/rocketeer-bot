@@ -29,6 +29,7 @@ module.exports = function (client) {
     const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code } = req.body;
 
     try {
+      const warnings = [];
       if (moderator_role_id !== undefined) {
         updateSetting(guildId, 'moderator_role_id', moderator_role_id || null);
       }
@@ -36,24 +37,32 @@ module.exports = function (client) {
         const val = parseInt(crosspost_threshold);
         if (val >= 1 && val <= 100) {
           updateSetting(guildId, 'crosspost_threshold', val);
+        } else {
+          warnings.push('Crosspost threshold must be between 1 and 100');
         }
       }
       if (crosspost_detection_seconds !== undefined) {
         const val = parseInt(crosspost_detection_seconds);
         if (val >= 5 && val <= 300) {
           updateSetting(guildId, 'crosspost_detection_seconds', val);
+        } else {
+          warnings.push('Detection seconds must be between 5 and 300');
         }
       }
       if (crosspost_window_hours !== undefined) {
         const val = parseInt(crosspost_window_hours);
         if (val >= 1 && val <= 168) {
           updateSetting(guildId, 'crosspost_window_hours', val);
+        } else {
+          warnings.push('Window hours must be between 1 and 168');
         }
       }
       if (warning_threshold !== undefined) {
         const val = parseInt(warning_threshold);
         if (val >= 1 && val <= 50) {
           updateSetting(guildId, 'warning_threshold', val);
+        } else {
+          warnings.push('Warning threshold must be between 1 and 50');
         }
       }
       if (warn_log_channel_id !== undefined) {
@@ -185,7 +194,7 @@ module.exports = function (client) {
 
 
       const settings = getSettings(guildId);
-      res.json({ success: true, settings });
+      res.json({ success: true, settings, warnings: warnings.length > 0 ? warnings : undefined });
     } catch (err) {
       logger.error('Failed to update settings:', err);
       res.status(500).json({ error: 'Failed to update settings' });

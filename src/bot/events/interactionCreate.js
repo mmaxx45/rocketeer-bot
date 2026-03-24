@@ -4,7 +4,7 @@ const { getWarnings, getWarningCount, addWarning } = require('../../database/war
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
 const { canWarn, canBan, isExempt, isModerator, canViewModActions } = require('../utils/permissions');
-const { storePendingAction, consumePendingAction } = require('../utils/pendingActions');
+const { storePendingAction, getPendingAction, consumePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
 const { parseDuration, formatDuration } = require('../utils/parseDuration');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
@@ -396,7 +396,7 @@ async function handleButton(interaction) {
 
   if (action === 'cancel_ban') {
     const actionId = params[0];
-    const pending = consumePendingAction(actionId);
+    const pending = getPendingAction(actionId);
 
     if (!pending) {
       return interaction.reply({ content: 'This action has already expired or been completed.', flags: MessageFlags.Ephemeral });
@@ -405,6 +405,8 @@ async function handleButton(interaction) {
     if (interaction.user.id !== pending.moderatorId) {
       return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
+
+    consumePendingAction(actionId);
 
     await interaction.update({
       content: 'Ban cancelled.',
@@ -416,7 +418,7 @@ async function handleButton(interaction) {
 
   if (action === 'cancel_action') {
     const actionId = params[0];
-    const pending = consumePendingAction(actionId);
+    const pending = getPendingAction(actionId);
 
     if (!pending) {
       return interaction.reply({ content: 'This action has already expired or been completed.', flags: MessageFlags.Ephemeral });
@@ -425,6 +427,8 @@ async function handleButton(interaction) {
     if (interaction.user.id !== pending.moderatorId) {
       return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
+
+    consumePendingAction(actionId);
 
     await interaction.update({
       content: 'Action cancelled.',
@@ -512,6 +516,12 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'Invalid self-role button.', flags: MessageFlags.Ephemeral });
     }
 
+    // Validate roleId is actually registered in this panel (prevent privilege escalation)
+    const panelOptions = getRoleOptions(panelId);
+    if (!panelOptions.some(opt => opt.role_id === roleId)) {
+      return interaction.reply({ content: 'This role is not part of this panel.', flags: MessageFlags.Ephemeral });
+    }
+
     try {
       const member = interaction.member;
       const role = interaction.guild.roles.cache.get(roleId);
@@ -539,7 +549,7 @@ async function handleButton(interaction) {
       }
     } catch (err) {
       logger.error(`Failed to toggle self-role: ${err.message}`);
-      return interaction.reply({ content: `Failed to toggle role: ${err.message}`, flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: 'Failed to toggle role. Please try again later.', flags: MessageFlags.Ephemeral });
     }
   }
 
