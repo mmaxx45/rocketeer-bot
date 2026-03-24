@@ -11,6 +11,13 @@ module.exports = {
   name: 'messageUpdate',
   async execute(oldMessage, newMessage) {
     // Fetch partial messages if needed
+    if (oldMessage.partial) {
+      try {
+        oldMessage = await oldMessage.fetch();
+      } catch {
+        // Can't fetch old message — proceed and treat as changed
+      }
+    }
     if (newMessage.partial) {
       try {
         newMessage = await newMessage.fetch();

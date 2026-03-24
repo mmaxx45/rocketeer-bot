@@ -5,7 +5,7 @@ const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../..
 const { db } = require('../../database/db');
 const logger = require('../../logger');
 const { userCanManageGuild } = require('../middleware/auth');
-const { addFilterWord, removeFilterWord, getFilterWords } = require('../../database/wordFilter');
+const { addFilterWord, removeFilterWord, removeFilterWordById, getFilterWords } = require('../../database/wordFilter');
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) return next();
@@ -246,6 +246,18 @@ module.exports = function (client) {
     res.json({ warnings: rows, total, page, totalPages: Math.ceil(total / limit) });
   });
 
+  // Clear all warnings for a user (must be before :warningId to avoid shadowing)
+  router.delete('/guild/:guildId/warnings/user/:userId', ensureGuildAccess, (req, res) => {
+    const { guildId, userId } = req.params;
+    try {
+      clearUserWarnings(guildId, userId);
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to clear user warnings:', err);
+      res.status(500).json({ error: 'Failed to clear warnings' });
+    }
+  });
+
   // Delete a warning
   router.delete('/guild/:guildId/warnings/:warningId', ensureGuildAccess, (req, res) => {
     const { guildId, warningId } = req.params;
@@ -255,18 +267,6 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to delete warning:', err);
       res.status(500).json({ error: 'Failed to delete warning' });
-    }
-  });
-
-  // Clear all warnings for a user
-  router.delete('/guild/:guildId/warnings/user/:userId', ensureGuildAccess, (req, res) => {
-    const { guildId, userId } = req.params;
-    try {
-      clearUserWarnings(guildId, userId);
-      res.json({ success: true });
-    } catch (err) {
-      logger.error('Failed to clear user warnings:', err);
-      res.status(500).json({ error: 'Failed to clear warnings' });
     }
   });
 
@@ -504,11 +504,11 @@ module.exports = function (client) {
     }
   });
 
-  // Remove filter word
-  router.delete('/guild/:guildId/filter-words/:word', ensureGuildAccess, (req, res) => {
-    const { guildId, word } = req.params;
+  // Remove filter word by ID
+  router.delete('/guild/:guildId/filter-words/:wordId', ensureGuildAccess, (req, res) => {
+    const { guildId, wordId } = req.params;
     try {
-      removeFilterWord(guildId, decodeURIComponent(word));
+      removeFilterWordById(guildId, parseInt(wordId, 10));
       const words = getFilterWords(guildId);
       res.json({ success: true, words });
     } catch (err) {

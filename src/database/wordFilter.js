@@ -30,6 +30,11 @@ function removeFilterWord(guildId, word) {
   return getStmts().removeWord.run(guildId, word.toLowerCase());
 }
 
+function removeFilterWordById(guildId, id) {
+  const { db } = require('./db');
+  return db.prepare('DELETE FROM word_filter WHERE guild_id = ? AND id = ?').run(guildId, id);
+}
+
 function getFilterWords(guildId) {
   return getStmts().getWords.all(guildId);
 }
@@ -56,6 +61,7 @@ function getFilterViolations(guildId, limit = 25, offset = 0) {
 module.exports = {
   addFilterWord,
   removeFilterWord,
+  removeFilterWordById,
   getFilterWords,
   getFilterWordsByTier,
   addFilterViolation,

@@ -309,7 +309,7 @@ async function handleButton(interaction) {
 
     try {
       // DM the banned user BEFORE banning (after ban, bot and user share no guilds)
-      await sendBanDM(interaction.client, interaction.guild, pending.targetId, pending.reason, null, banSettings);
+      await sendBanDM(interaction.client, interaction.guild, pending.targetId, pending.reason, pending.duration ? `${pending.duration} day(s)` : null, banSettings);
 
       const deleteMessageSeconds = (pending.deleteMessageDays || 0) * 86400;
       try {

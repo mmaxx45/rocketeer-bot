@@ -130,7 +130,7 @@ async function handleDM(message) {
       if (channel) {
         const embed = new EmbedBuilder()
           .setAuthor({
-            name: message.author.username || message.author.username,
+            name: message.author.globalName || message.author.username,
             iconURL: message.author.displayAvatarURL(),
           })
           .setDescription(message.content || '*No text content*')
@@ -164,7 +164,7 @@ async function handleDM(message) {
       return;
     }
 
-    const displayName = message.author.username || message.author.username;
+    const displayName = message.author.globalName || message.author.username;
     const channelName = `modmail-${message.author.username.toLowerCase().replace(/[^a-z0-9]/g, '-')}`.slice(0, 100);
 
     const modmailChannel = await targetGuild.channels.create({
@@ -286,7 +286,7 @@ async function handleModmailReply(message) {
   // This is a modmail channel - relay the mod's message to the user
   try {
     const user = await message.client.users.fetch(thread.user_id);
-    const displayName = message.member?.displayName || message.author.username || message.author.username;
+    const displayName = message.member?.displayName || message.author.globalName || message.author.username;
 
     const embed = new EmbedBuilder()
       .setAuthor({

@@ -26,12 +26,10 @@ function buildPanelButtons(panelId, roleOptions, guild) {
   for (const option of roleOptions) {
     if (buttonCount === 5) {
       rows.push(currentRow);
+      if (rows.length >= 5) break; // Max 5 rows (25 buttons)
       currentRow = new ActionRowBuilder();
       buttonCount = 0;
     }
-
-    // Max 5 rows (25 buttons)
-    if (rows.length >= 5) break;
 
     const role = guild.roles.cache.get(option.role_id);
     const label = option.label || (role ? role.name : 'Unknown Role');
