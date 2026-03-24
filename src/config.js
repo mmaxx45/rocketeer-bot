@@ -21,6 +21,7 @@ module.exports = {
   web: {
     port: parseInt(process.env.PORT, 10) || 3000,
     sessionSecret: process.env.SESSION_SECRET,
+    dashboardUrl: process.env.DASHBOARD_URL || 'http://localhost:3000',
   },
   defaults: {
     crosspostThreshold: 80,

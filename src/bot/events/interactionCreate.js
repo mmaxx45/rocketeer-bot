@@ -10,7 +10,7 @@ const { parseDuration, formatDuration } = require('../utils/parseDuration');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
 const { getRoleOptions } = require('../../database/selfRoles');
 const { addTempBan } = require('../../database/tempbans');
-const { createAppeal, getOpenAppeal, getAppealById, getAppealByChannel, resolveAppeal } = require('../../database/appeals');
+const { getAppealById, getAppealByChannel, resolveAppeal } = require('../../database/appeals');
 
 const DEFAULT_WARN_REASONS = [
   'Spam or flooding',
@@ -40,11 +40,13 @@ async function sendBanDM(client, guild, targetId, reason, duration, settings) {
 
     const dmComponents = [];
     if (settings.appeal_enabled && settings.appeal_category_id) {
+      const config = require('../../config');
+      const appealUrl = `${config.web.dashboardUrl}/appeal/${guild.id}`;
       dmComponents.push(new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`ban_appeal:${guild.id}`)
           .setLabel('Appeal Ban')
-          .setStyle(ButtonStyle.Primary),
+          .setStyle(ButtonStyle.Link)
+          .setURL(appealUrl),
       ));
     }
 
@@ -649,132 +651,7 @@ async function handleButton(interaction) {
     return;
   }
 
-  // ─── Ban Appeal Handlers ───
-
-  if (action === 'ban_appeal') {
-    const guildId = params[0];
-    if (!guildId) {
-      return interaction.reply({ content: 'Invalid appeal request.' });
-    }
-
-    try {
-      await interaction.deferReply();
-    } catch (err) {
-      logger.error(`Failed to defer ban appeal interaction: ${err.message}`);
-      return;
-    }
-
-    try {
-      const guild = await interaction.client.guilds.fetch(guildId);
-      if (!guild) {
-        return interaction.editReply({ content: 'Could not find that server.' });
-      }
-
-      const appealSettings = getSettings(guildId);
-      if (!appealSettings.appeal_enabled || !appealSettings.appeal_category_id) {
-        return interaction.editReply({ content: 'Ban appeals are not enabled on that server.' });
-      }
-
-      // Check if user is actually banned
-      try {
-        await guild.bans.fetch(interaction.user.id);
-      } catch {
-        return interaction.editReply({ content: 'You are not currently banned from that server.' });
-      }
-
-      // Check for existing open appeal
-      const existingAppeal = getOpenAppeal(guildId, interaction.user.id);
-      if (existingAppeal) {
-        return interaction.editReply({ content: 'You already have a pending appeal for that server. Please wait for a moderator to review it.' });
-      }
-
-      // Get the ban reason from the guild
-      let banReason = 'No reason provided';
-      try {
-        const banInfo = await guild.bans.fetch(interaction.user.id);
-        if (banInfo.reason) banReason = banInfo.reason;
-      } catch {
-        // Could not fetch ban info
-      }
-
-
-
-      // Build permission overwrites for the appeal channel
-      const overwrites = [
-        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageMessages] },
-      ];
-
-      if (appealSettings.moderator_role_id) {
-        overwrites.push({ id: appealSettings.moderator_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-      }
-
-      const channel = await guild.channels.create({
-        name: `appeal-${interaction.user.username}`.slice(0, 100),
-        type: ChannelType.GuildText,
-        parent: appealSettings.appeal_category_id,
-        permissionOverwrites: overwrites,
-      });
-
-      // Record appeal in database
-      const appealId = createAppeal(guildId, interaction.user.id, channel.id, banReason);
-
-      // Build the appeal info embed
-      const accountCreated = interaction.user.createdAt;
-      const appealEmbed = new EmbedBuilder()
-        .setTitle('Ban Appeal')
-        .setColor(0xFFA500)
-        .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 128 }))
-        .addFields(
-          { name: 'User', value: `${interaction.user.username} (${interaction.user.id})`, inline: true },
-          { name: 'Account Created', value: `<t:${Math.floor(accountCreated.getTime() / 1000)}:R>`, inline: true },
-          { name: 'Ban Reason', value: banReason },
-        )
-        .setTimestamp();
-
-      const appealRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`appeal_accept:${appealId}`)
-          .setLabel('Accept (Unban)')
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId(`appeal_reject:${appealId}`)
-          .setLabel('Reject')
-          .setStyle(ButtonStyle.Danger),
-      );
-
-      await channel.send({ embeds: [appealEmbed], components: [appealRow] });
-
-      // Ping the moderator role
-      if (appealSettings.moderator_role_id) {
-        await channel.send({
-          content: `<@&${appealSettings.moderator_role_id}> — A new ban appeal has been submitted.`,
-          allowedMentions: { roles: [appealSettings.moderator_role_id] },
-        });
-      }
-
-      // Disable the appeal button in the DM message
-      try {
-        const disabledRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`ban_appeal:${guildId}`)
-            .setLabel('Appeal Submitted')
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(true),
-        );
-        await interaction.message.edit({ components: [disabledRow] });
-      } catch {
-        // May fail if message is too old
-      }
-
-      await interaction.editReply({ content: 'Your ban appeal has been submitted. A moderator will review it shortly.' });
-      logger.info(`Ban appeal created: user=${interaction.user.username} guild=${guild.name} appealId=${appealId}`);
-    } catch (err) {
-      logger.error(`Failed to create ban appeal: ${err.message}`);
-      await interaction.editReply({ content: 'Failed to submit your appeal. Please try again later or contact a server admin.' });
-    }
-    return;
-  }
+  // ─── Ban Appeal Handlers (accept/reject buttons in appeal channels) ───
 
   if (action === 'appeal_accept') {
     const appealId = parseInt(params[0], 10);

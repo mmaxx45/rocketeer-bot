@@ -109,6 +109,16 @@ function createWebServer(client) {
     legacyHeaders: false,
   });
 
+  // Public appeal route (no auth required, strict rate limit)
+  const appealLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please try again later.' },
+  });
+  app.use('/appeal', appealLimiter, require('./routes/appeal')(client));
+
   app.use('/auth', require('./routes/auth').router);
   app.use('/dashboard', dashboardLimiter, require('./routes/dashboard')(client));
   app.use('/api', apiLimiter, csrfGuard, require('./routes/api')(client));
