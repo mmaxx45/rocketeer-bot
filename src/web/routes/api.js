@@ -50,7 +50,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id, ticket_open_message, license_role_prices } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id, ticket_open_message, license_role_prices, banned_domains } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -179,6 +179,15 @@ module.exports = function (client) {
         // Accepts JSON string or object
         const pricesStr = typeof license_role_prices === 'string' ? license_role_prices : JSON.stringify(license_role_prices);
         updateSetting(guildId, 'license_role_prices', pricesStr || null);
+      }
+      if (banned_domains !== undefined) {
+        const raw = banned_domains.trim();
+        if (!raw) {
+          updateSetting(guildId, 'banned_domains', null);
+        } else {
+          const parsed = raw.split(/[,\s]+/).map(d => d.toLowerCase().trim()).filter(Boolean);
+          updateSetting(guildId, 'banned_domains', JSON.stringify(parsed));
+        }
       }
 
       const settings = getSettings(guildId);

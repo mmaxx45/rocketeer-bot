@@ -7,6 +7,7 @@ const { addModAction } = require('../../database/modactions');
 const { getSimilarity, normalizeMessage, MIN_MESSAGE_LENGTH } = require('../utils/similarity');
 const { isExempt } = require('../utils/permissions');
 const { getBlockedExtensions, isBlockedFile } = require('../utils/fileFilter');
+const { parseBannedDomains, checkForBannedLinks } = require('../utils/linkFilter');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../../database/db');
 const { createThread, getOpenThread, getOpenThreadByChannel, closeThread } = require('../../database/modmail');
@@ -415,6 +416,47 @@ module.exports = {
         }
 
         return; // Don't process for crosspost
+      }
+    }
+
+    // --- Banned link filtering ---
+    if (hasContent && !memberIsExempt && !isExemptChannel) {
+      const bannedDomains = parseBannedDomains(settings.banned_domains);
+      if (bannedDomains.length > 0) {
+        const matchedDomain = checkForBannedLinks(message.content, bannedDomains);
+        if (matchedDomain) {
+          logger.info(`Banned link detected: user=${message.author.username} guild=${guildId} domain=${matchedDomain}`);
+
+          try {
+            await message.delete();
+          } catch (err) {
+            logger.warn(`Failed to delete banned link message: ${err.message}`);
+          }
+
+          // Log to warn log channel if configured (no public message)
+          if (settings.warn_log_channel_id) {
+            try {
+              const logChannel = await message.guild.channels.fetch(settings.warn_log_channel_id);
+              if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                  .setTitle('Banned Link Deleted')
+                  .setColor(0xFF4444)
+                  .addFields(
+                    { name: 'User', value: `<@${message.author.id}> (${message.author.id})`, inline: true },
+                    { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
+                    { name: 'Matched Domain', value: matchedDomain, inline: true },
+                    { name: 'Message Content', value: message.content.length > 1024 ? message.content.slice(0, 1021) + '...' : message.content, inline: false },
+                  )
+                  .setTimestamp();
+                await logChannel.send({ embeds: [logEmbed] });
+              }
+            } catch (err) {
+              logger.warn(`Failed to post banned link log: ${err.message}`);
+            }
+          }
+
+          return; // Don't process for crosspost
+        }
       }
     }
 

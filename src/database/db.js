@@ -222,6 +222,12 @@ function runMigrations() {
     db.pragma('user_version = 14');
   }
 
+  if (version < 15) {
+    logger.info('Running database migration v15: add banned_domains');
+    safeAddColumn('guild_settings', 'banned_domains', 'TEXT DEFAULT NULL');
+    db.pragma('user_version = 15');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

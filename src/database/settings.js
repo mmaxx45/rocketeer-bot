@@ -38,6 +38,7 @@ function getStmts() {
         ticket_open_message: db.prepare(`UPDATE guild_settings SET ticket_open_message = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         license_required_role_ids: db.prepare(`UPDATE guild_settings SET license_required_role_ids = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         license_role_prices: db.prepare(`UPDATE guild_settings SET license_role_prices = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        banned_domains: db.prepare(`UPDATE guild_settings SET banned_domains = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }
@@ -128,6 +129,33 @@ function setLicenseRolePrice(guildId, roleId, price) {
   return prices;
 }
 
+function getBannedDomains(guildId) {
+  const settings = getSettings(guildId);
+  try {
+    return JSON.parse(settings.banned_domains || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function addBannedDomain(guildId, domain) {
+  const domains = getBannedDomains(guildId);
+  const normalized = domain.toLowerCase().trim();
+  if (!domains.includes(normalized)) {
+    domains.push(normalized);
+    updateSetting(guildId, 'banned_domains', JSON.stringify(domains));
+  }
+  return domains;
+}
+
+function removeBannedDomain(guildId, domain) {
+  const domains = getBannedDomains(guildId);
+  const normalized = domain.toLowerCase().trim();
+  const filtered = domains.filter(d => d !== normalized);
+  updateSetting(guildId, 'banned_domains', JSON.stringify(filtered));
+  return filtered;
+}
+
 module.exports = {
   getSettings,
   updateSetting,
@@ -139,4 +167,7 @@ module.exports = {
   removeLicenseRequiredRole,
   getLicenseRolePrices,
   setLicenseRolePrice,
+  getBannedDomains,
+  addBannedDomain,
+  removeBannedDomain,
 };
