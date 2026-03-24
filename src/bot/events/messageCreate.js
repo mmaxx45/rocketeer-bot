@@ -8,6 +8,8 @@ const { getSimilarity, normalizeMessage, MIN_MESSAGE_LENGTH } = require('../util
 const { isExempt } = require('../utils/permissions');
 const { getBlockedExtensions, isBlockedFile } = require('../utils/fileFilter');
 const { parseBannedDomains, checkForBannedLinks } = require('../utils/linkFilter');
+const { checkMessage } = require('../utils/wordFilter');
+const { getFilterWords, addFilterViolation, getRecentViolations } = require('../../database/wordFilter');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../../database/db');
 const { createThread, getOpenThread, getOpenThreadByChannel, closeThread } = require('../../database/modmail');
@@ -452,6 +454,138 @@ module.exports = {
               }
             } catch (err) {
               logger.warn(`Failed to post banned link log: ${err.message}`);
+            }
+          }
+
+          return; // Don't process further
+        }
+      }
+    }
+
+    // --- Word filter ---
+    if (hasContent && !memberIsExempt && settings.filter_enabled) {
+      const filterWords = getFilterWords(guildId);
+      if (filterWords.length > 0) {
+        const matches = checkMessage(message.content, filterWords);
+        if (matches.length > 0) {
+          // Use the highest severity match
+          const match = matches[0];
+
+          // Delete the message
+          try {
+            await message.delete();
+          } catch (err) {
+            logger.warn(`Failed to delete filtered message: ${err.message}`);
+          }
+
+          // Log violation
+          addFilterViolation(guildId, message.author.id, match.word, match.tier, message.content, message.channel.id);
+
+          logger.info(`Word filter triggered: user=${message.author.username} guild=${guildId} word=${match.word} tier=${match.tier}`);
+
+          if (match.tier === 'hard') {
+            // Hard slur: auto-warn + log + DM
+            addWarning(guildId, message.author.id, message.client.user.id, `Automatic warning: used a prohibited word (hard filter)`, 'manual', message.content);
+            const warningCount = getWarningCount(guildId, message.author.id);
+
+            try {
+              addModAction(guildId, message.client.user.id, 'filter_warn', message.author.id, `Hard filter triggered: "${match.word}"`);
+            } catch (err) {
+              logger.warn(`Failed to log filter mod action: ${err.message}`);
+            }
+
+            // DM the user
+            try {
+              await message.author.send({
+                embeds: [
+                  new EmbedBuilder()
+                    .setTitle('Message Removed')
+                    .setColor(0xFF0000)
+                    .setDescription(`Your message in **${message.guild.name}** was removed because it contained a prohibited word. You have received an automatic warning (warning #${warningCount}).`)
+                    .setTimestamp(),
+                ],
+              });
+            } catch {
+              // Can't DM user — that's fine
+            }
+
+            // Log to warn channel
+            if (settings.warn_log_channel_id) {
+              try {
+                const logChannel = await message.guild.channels.fetch(settings.warn_log_channel_id);
+                if (logChannel) {
+                  const logEmbed = new EmbedBuilder()
+                    .setTitle('Word Filter - Hard Slur Detected')
+                    .setColor(0xFF0000)
+                    .addFields(
+                      { name: 'User', value: `<@${message.author.id}> (${message.author.id})`, inline: true },
+                      { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
+                      { name: 'Matched Word', value: `||${match.word}||`, inline: true },
+                      { name: 'Action', value: `Message deleted + Warning #${warningCount} issued`, inline: false },
+                    )
+                    .setTimestamp();
+                  await logChannel.send({ embeds: [logEmbed] });
+                }
+              } catch (err) {
+                logger.warn(`Failed to post filter log: ${err.message}`);
+              }
+            }
+          } else if (match.tier === 'soft') {
+            // Soft slur: check threshold
+            const windowMinutes = settings.soft_slur_window_minutes || 60;
+            const threshold = settings.soft_slur_threshold || 3;
+            const recentCount = getRecentViolations(guildId, message.author.id, windowMinutes);
+
+            // Log to warn channel
+            if (settings.warn_log_channel_id) {
+              try {
+                const logChannel = await message.guild.channels.fetch(settings.warn_log_channel_id);
+                if (logChannel) {
+                  const logEmbed = new EmbedBuilder()
+                    .setTitle('Word Filter - Soft Slur Detected')
+                    .setColor(0xFFA500)
+                    .addFields(
+                      { name: 'User', value: `<@${message.author.id}> (${message.author.id})`, inline: true },
+                      { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
+                      { name: 'Matched Word', value: `||${match.word}||`, inline: true },
+                      { name: 'Action', value: 'Message deleted silently', inline: false },
+                      { name: 'Violations in Window', value: `${recentCount} / ${threshold} (last ${windowMinutes} min)`, inline: false },
+                    )
+                    .setTimestamp();
+
+                  if (recentCount >= threshold) {
+                    logEmbed.setColor(0xFF0000);
+                    logEmbed.setTitle('Word Filter - Soft Slur Threshold Reached');
+                    logEmbed.setDescription(`**Staff notification:** <@${message.author.id}> has reached ${recentCount} soft slur violations in the last ${windowMinutes} minutes.`);
+                  }
+
+                  await logChannel.send({ embeds: [logEmbed] });
+                }
+              } catch (err) {
+                logger.warn(`Failed to post filter log: ${err.message}`);
+              }
+            }
+          } else if (match.tier === 'auto_delete') {
+            // Auto-delete: just log silently
+            if (settings.warn_log_channel_id) {
+              try {
+                const logChannel = await message.guild.channels.fetch(settings.warn_log_channel_id);
+                if (logChannel) {
+                  const logEmbed = new EmbedBuilder()
+                    .setTitle('Word Filter - Auto-Delete')
+                    .setColor(0x808080)
+                    .addFields(
+                      { name: 'User', value: `<@${message.author.id}> (${message.author.id})`, inline: true },
+                      { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
+                      { name: 'Matched Word', value: `||${match.word}||`, inline: true },
+                      { name: 'Action', value: 'Message auto-deleted', inline: false },
+                    )
+                    .setTimestamp();
+                  await logChannel.send({ embeds: [logEmbed] });
+                }
+              } catch (err) {
+                logger.warn(`Failed to post filter log: ${err.message}`);
+              }
             }
           }
 

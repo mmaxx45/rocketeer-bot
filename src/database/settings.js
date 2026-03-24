@@ -39,6 +39,9 @@ function getStmts() {
         license_required_role_ids: db.prepare(`UPDATE guild_settings SET license_required_role_ids = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         license_role_prices: db.prepare(`UPDATE guild_settings SET license_role_prices = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         banned_domains: db.prepare(`UPDATE guild_settings SET banned_domains = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        filter_enabled: db.prepare(`UPDATE guild_settings SET filter_enabled = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        soft_slur_threshold: db.prepare(`UPDATE guild_settings SET soft_slur_threshold = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        soft_slur_window_minutes: db.prepare(`UPDATE guild_settings SET soft_slur_window_minutes = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }

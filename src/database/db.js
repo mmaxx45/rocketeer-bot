@@ -228,6 +228,40 @@ function runMigrations() {
     db.pragma('user_version = 15');
   }
 
+  if (version < 16) {
+    logger.info('Running database migration v16: word filter system');
+    safeAddColumn('guild_settings', 'filter_enabled', 'INTEGER DEFAULT 1');
+    safeAddColumn('guild_settings', 'soft_slur_threshold', 'INTEGER DEFAULT 3');
+    safeAddColumn('guild_settings', 'soft_slur_window_minutes', 'INTEGER DEFAULT 60');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS word_filter (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        word TEXT NOT NULL,
+        tier TEXT NOT NULL CHECK(tier IN ('hard', 'soft', 'auto_delete')),
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_word_filter_guild_word ON word_filter(guild_id, word);
+      CREATE INDEX IF NOT EXISTS idx_word_filter_guild_tier ON word_filter(guild_id, tier);
+
+      CREATE TABLE IF NOT EXISTS filter_violations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        word_matched TEXT NOT NULL,
+        tier TEXT NOT NULL,
+        message_content TEXT,
+        channel_id TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_filter_violations_guild_user ON filter_violations(guild_id, user_id);
+      CREATE INDEX IF NOT EXISTS idx_filter_violations_created ON filter_violations(created_at);
+    `);
+    db.pragma('user_version = 16');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

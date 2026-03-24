@@ -8,6 +8,7 @@ const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../..
 const { db } = require('../../database/db');
 const logger = require('../../logger');
 const { userCanManageGuild } = require('../middleware/auth');
+const { addFilterWord, removeFilterWord, getFilterWords } = require('../../database/wordFilter');
 
 // Multer config for loader uploads — store per guild
 const loaderStorage = multer.diskStorage({
@@ -50,7 +51,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id, ticket_open_message, license_role_prices, banned_domains } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, ticket_category_id, ticket_admin_role_id, ticket_log_channel_id, ticket_open_message, license_role_prices, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes } = req.body;
 
     try {
       if (moderator_role_id !== undefined) {
@@ -180,6 +181,7 @@ module.exports = function (client) {
         const pricesStr = typeof license_role_prices === 'string' ? license_role_prices : JSON.stringify(license_role_prices);
         updateSetting(guildId, 'license_role_prices', pricesStr || null);
       }
+<<<<<<< HEAD
       if (banned_domains !== undefined) {
         const raw = banned_domains.trim();
         if (!raw) {
@@ -187,6 +189,21 @@ module.exports = function (client) {
         } else {
           const parsed = raw.split(/[,\s]+/).map(d => d.toLowerCase().trim()).filter(Boolean);
           updateSetting(guildId, 'banned_domains', JSON.stringify(parsed));
+        }
+      }
+      if (filter_enabled !== undefined) {
+        updateSetting(guildId, 'filter_enabled', filter_enabled === 'on' || filter_enabled === '1' || filter_enabled === true ? 1 : 0);
+      }
+      if (soft_slur_threshold !== undefined) {
+        const val = parseInt(soft_slur_threshold);
+        if (val >= 1 && val <= 50) {
+          updateSetting(guildId, 'soft_slur_threshold', val);
+        }
+      }
+      if (soft_slur_window_minutes !== undefined) {
+        const val = parseInt(soft_slur_window_minutes);
+        if (val >= 1 && val <= 10080) {
+          updateSetting(guildId, 'soft_slur_window_minutes', val);
         }
       }
 
@@ -461,6 +478,50 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to delete loader file:', err);
       res.status(500).json({ error: 'Failed to delete loader file' });
+    }
+  });
+
+  // Get filter words
+  router.get('/guild/:guildId/filter-words', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    try {
+      const words = getFilterWords(guildId);
+      res.json({ words });
+    } catch (err) {
+      logger.error('Failed to fetch filter words:', err);
+      res.status(500).json({ error: 'Failed to fetch filter words' });
+    }
+  });
+
+  // Add filter word
+  router.post('/guild/:guildId/filter-words', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const { word, tier } = req.body;
+
+    if (!word || !tier || !['hard', 'soft', 'auto_delete'].includes(tier)) {
+      return res.status(400).json({ error: 'Invalid word or tier' });
+    }
+
+    try {
+      addFilterWord(guildId, word.toLowerCase().trim(), tier);
+      const words = getFilterWords(guildId);
+      res.json({ success: true, words });
+    } catch (err) {
+      logger.error('Failed to add filter word:', err);
+      res.status(500).json({ error: 'Failed to add filter word' });
+    }
+  });
+
+  // Remove filter word
+  router.delete('/guild/:guildId/filter-words/:word', ensureGuildAccess, (req, res) => {
+    const { guildId, word } = req.params;
+    try {
+      removeFilterWord(guildId, decodeURIComponent(word));
+      const words = getFilterWords(guildId);
+      res.json({ success: true, words });
+    } catch (err) {
+      logger.error('Failed to remove filter word:', err);
+      res.status(500).json({ error: 'Failed to remove filter word' });
     }
   });
 
