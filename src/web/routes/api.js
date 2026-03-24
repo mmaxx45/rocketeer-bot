@@ -381,6 +381,12 @@ module.exports = function (client) {
     }
   });
 
+  // --- Stats detail endpoints ---
+  // NOTE: These detail routes use inline db.prepare() rather than module-level
+  // cached statements. This is intentional — they are read-infrequently
+  // (on-demand modal views) so the overhead is negligible, and keeping the
+  // queries co-located with each handler improves readability.
+
   // Warnings detail breakdown
   router.get('/guild/:guildId/stats/warnings-detail', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
