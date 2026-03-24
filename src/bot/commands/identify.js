@@ -1,9 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
-const { getWarnings, getWarningCount } = require('../../database/warnings');
+const { getWarnings } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { isModerator } = require('../utils/permissions');
 const { db } = require('../../database/db');
-const logger = require('../../logger');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -80,11 +79,9 @@ module.exports = {
       }
     } else {
       // Check if they're banned
-      let banned = false;
       try {
         const ban = await interaction.guild.bans.fetch(userId);
         if (ban) {
-          banned = true;
           embed.addFields(
             { name: 'Status', value: '\uD83D\uDD28 Banned from server', inline: true },
             { name: 'Ban Reason', value: ban.reason || 'No reason provided', inline: true },
