@@ -252,6 +252,185 @@ async function removeBannedDomain(guildId, domain, btn) {
   }
 }
 
+// ===== Self Roles =====
+async function loadSelfRolePanels(guildId) {
+  const container = document.getElementById('selfrole-panels-container');
+  if (!container) return;
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/self-role-panels`);
+    const result = await res.json();
+    if (!result.success) {
+      container.innerHTML = '<div class="text-danger">Failed to load panels</div>';
+      return;
+    }
+
+    if (result.panels.length === 0) {
+      container.innerHTML = '<div class="text-muted"><i class="bi bi-info-circle"></i> No self-role panels yet. Create one below.</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    result.panels.forEach(panel => {
+      const card = document.createElement('div');
+      card.className = 'card bg-dark border-secondary mb-3';
+      card.id = `selfrole-panel-${panel.id}`;
+
+      const rolesList = panel.options.map(opt => {
+        const emojiDisplay = opt.emoji ? opt.emoji + ' ' : '';
+        const labelDisplay = opt.label || opt.role_name;
+        return `<span class="badge bg-secondary d-inline-flex align-items-center gap-1 py-1 me-1 mb-1" data-role-id="${opt.role_id}">
+          ${emojiDisplay}<span style="color: ${escapeHtml(opt.role_color)}">${escapeHtml(labelDisplay)}</span>
+          <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
+                  onclick="removeSelfRole('${guildId}', '${panel.id}', '${opt.role_id}', this)"></button>
+        </span>`;
+      }).join('');
+
+      card.innerHTML = `
+        <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+          <div>
+            <strong>${escapeHtml(panel.title || 'Self Roles')}</strong>
+            <span class="text-muted ms-2" style="font-size: 0.8rem;">Panel #${panel.id} &bull; #${escapeHtml(panel.channel_id)}</span>
+          </div>
+          <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteSelfRolePanel('${guildId}', '${panel.id}')">
+            <i class="bi bi-trash"></i> Delete
+          </button>
+        </div>
+        <div class="card-body">
+          <div class="d-flex flex-wrap mb-3" id="selfrole-roles-${panel.id}">
+            ${rolesList || '<span class="text-muted">No roles added yet</span>'}
+          </div>
+          <div class="d-flex gap-2 align-items-end flex-wrap">
+            <div>
+              <label class="setting-label" style="font-size:0.75rem;">Role</label>
+              <select id="selfrole-add-role-${panel.id}" class="form-select form-select-sm" style="min-width:150px;">
+                <option value="">-- Role --</option>
+              </select>
+            </div>
+            <div>
+              <label class="setting-label" style="font-size:0.75rem;">Emoji</label>
+              <input type="text" id="selfrole-add-emoji-${panel.id}" class="form-control form-control-sm" placeholder="🎮" style="width:70px;">
+            </div>
+            <div>
+              <label class="setting-label" style="font-size:0.75rem;">Label <span class="text-muted">(optional)</span></label>
+              <input type="text" id="selfrole-add-label-${panel.id}" class="form-control form-control-sm" placeholder="Custom text" style="width:130px;">
+            </div>
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addSelfRole('${guildId}', '${panel.id}')">
+              <i class="bi bi-plus-lg"></i> Add Role
+            </button>
+          </div>
+        </div>
+      `;
+      container.appendChild(card);
+
+      // Populate the role dropdown (excluding roles already on this panel)
+      const roleSelect = document.getElementById(`selfrole-add-role-${panel.id}`);
+      const existingRoleIds = panel.options.map(o => o.role_id);
+      const allRoles = window.__guildRoles || [];
+      allRoles.forEach(r => {
+        if (!existingRoleIds.includes(r.id)) {
+          const opt = document.createElement('option');
+          opt.value = r.id;
+          opt.textContent = r.name;
+          roleSelect.appendChild(opt);
+        }
+      });
+    });
+  } catch (err) {
+    container.innerHTML = '<div class="text-danger">Error loading panels: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+async function createSelfRolePanel(guildId) {
+  const channelId = document.getElementById('selfrole-new-channel').value;
+  const title = document.getElementById('selfrole-new-title').value.trim();
+  const description = document.getElementById('selfrole-new-desc').value.trim();
+
+  if (!channelId) { showToast('Select a channel', 'error'); return; }
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/self-role-panels`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelId, title: title || 'Self Roles', description: description || null }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Panel created! Now add roles to it.');
+      loadSelfRolePanels(guildId);
+      document.getElementById('selfrole-new-channel').value = '';
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function deleteSelfRolePanel(guildId, panelId) {
+  if (!confirm('Delete this panel? The Discord message will also be removed.')) return;
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/self-role-panels/${panelId}`, { method: 'DELETE' });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Panel deleted.');
+      const card = document.getElementById(`selfrole-panel-${panelId}`);
+      if (card) card.remove();
+      // Check if no panels left
+      const container = document.getElementById('selfrole-panels-container');
+      if (container && container.children.length === 0) {
+        container.innerHTML = '<div class="text-muted"><i class="bi bi-info-circle"></i> No self-role panels yet. Create one below.</div>';
+      }
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function addSelfRole(guildId, panelId) {
+  const roleId = document.getElementById(`selfrole-add-role-${panelId}`).value;
+  const emoji = document.getElementById(`selfrole-add-emoji-${panelId}`).value.trim();
+  const label = document.getElementById(`selfrole-add-label-${panelId}`).value.trim();
+
+  if (!roleId) { showToast('Select a role', 'error'); return; }
+  if (!emoji && !label) { showToast('Provide an emoji, a label, or both', 'error'); return; }
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/self-role-panels/${panelId}/roles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roleId, emoji: emoji || null, label: label || null }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Role added!');
+      loadSelfRolePanels(guildId); // Refresh all panels
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function removeSelfRole(guildId, panelId, roleId, btn) {
+  try {
+    const res = await fetch(`/api/guild/${guildId}/self-role-panels/${panelId}/roles/${roleId}`, { method: 'DELETE' });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Role removed.');
+      loadSelfRolePanels(guildId); // Refresh
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
 // ===== Utility =====
 function escapeHtml(text) {
   const div = document.createElement('div');

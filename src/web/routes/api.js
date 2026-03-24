@@ -617,9 +617,12 @@ module.exports = function (client) {
     }
   });
 
-  // ========== Self-Role Panels (read-only) ==========
+  // ========== Self-Role Panels ==========
 
-  // Get self-role panels
+  const { createPanel, getPanel, getPanels, deletePanel, addRoleOption, removeRoleOption, getRoleOptions } = require('../../database/selfRoles');
+  const { buildPanelEmbed, buildPanelButtons } = require('../../bot/commands/selfroles');
+
+  // Get self-role panels with options
   router.get('/guild/:guildId/self-role-panels', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
 
@@ -628,20 +631,153 @@ module.exports = function (client) {
         'SELECT * FROM self_role_panels WHERE guild_id = ? ORDER BY created_at DESC'
       ).all(guildId);
 
-      // Attach role options to each panel
       const getOptionsStmt = db.prepare(
         'SELECT * FROM self_role_options WHERE panel_id = ?'
       );
 
+      const guild = client.guilds.cache.get(guildId);
       const result = panels.map(panel => ({
         ...panel,
-        options: getOptionsStmt.all(panel.id),
+        options: getOptionsStmt.all(panel.id).map(opt => {
+          const role = guild ? guild.roles.cache.get(opt.role_id) : null;
+          return { ...opt, role_name: role ? role.name : 'Deleted Role', role_color: role ? role.hexColor : '#99aab5' };
+        }),
       }));
 
       res.json({ success: true, panels: result });
     } catch (err) {
       logger.error('Failed to fetch self-role panels:', err);
       res.status(500).json({ error: 'Failed to fetch self-role panels' });
+    }
+  });
+
+  // Create a new panel
+  router.post('/guild/:guildId/self-role-panels', ensureGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const { channelId, title, description } = req.body;
+
+    if (!channelId) return res.status(400).json({ error: 'channelId is required' });
+
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+      const channel = await guild.channels.fetch(channelId);
+      if (!channel) return res.status(404).json({ error: 'Channel not found' });
+
+      const { EmbedBuilder } = require('discord.js');
+      const embed = new EmbedBuilder()
+        .setTitle(title || 'Self Roles')
+        .setDescription(description || 'Click a button below to toggle a role.')
+        .setColor(0x5865F2);
+
+      const message = await channel.send({ embeds: [embed], components: [] });
+      const panel = createPanel(guildId, channelId, message.id, title || 'Self Roles', description || null);
+
+      logger.info(`Self-roles panel ${panel.id} created via dashboard in #${channel.name}`);
+      res.json({ success: true, panel });
+    } catch (err) {
+      logger.error('Failed to create self-role panel:', err);
+      res.status(500).json({ error: 'Failed to create panel: ' + err.message });
+    }
+  });
+
+  // Delete a panel
+  router.delete('/guild/:guildId/self-role-panels/:panelId', ensureGuildAccess, async (req, res) => {
+    const { guildId, panelId } = req.params;
+
+    try {
+      const panel = getPanel(panelId);
+      if (!panel || panel.guild_id !== guildId) return res.status(404).json({ error: 'Panel not found' });
+
+      // Try to delete the Discord message
+      try {
+        const guild = client.guilds.cache.get(guildId);
+        const channel = await guild.channels.fetch(panel.channel_id);
+        const message = await channel.messages.fetch(panel.message_id);
+        await message.delete();
+      } catch { /* message may already be gone */ }
+
+      deletePanel(panelId);
+      logger.info(`Self-roles panel ${panelId} deleted via dashboard`);
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to delete self-role panel:', err);
+      res.status(500).json({ error: 'Failed to delete panel' });
+    }
+  });
+
+  // Add a role to a panel
+  router.post('/guild/:guildId/self-role-panels/:panelId/roles', ensureGuildAccess, async (req, res) => {
+    const { guildId, panelId } = req.params;
+    const { roleId, emoji, label } = req.body;
+
+    if (!roleId) return res.status(400).json({ error: 'roleId is required' });
+
+    try {
+      const panel = getPanel(panelId);
+      if (!panel || panel.guild_id !== guildId) return res.status(404).json({ error: 'Panel not found' });
+
+      const existing = getRoleOptions(panel.id);
+      if (existing.find(o => o.role_id === roleId)) return res.status(400).json({ error: 'Role already on panel' });
+      if (existing.length >= 25) return res.status(400).json({ error: 'Panel has maximum 25 roles' });
+
+      const options = addRoleOption(panel.id, roleId, label || null, emoji || null, null);
+
+      // Update Discord message
+      try {
+        const guild = client.guilds.cache.get(guildId);
+        const channel = await guild.channels.fetch(panel.channel_id);
+        const message = await channel.messages.fetch(panel.message_id);
+        const embed = buildPanelEmbed(panel.title, panel.description, options, guild);
+        const rows = buildPanelButtons(panel.id, options, guild);
+        await message.edit({ embeds: [embed], components: rows });
+      } catch (err) {
+        logger.warn(`Failed to update panel message: ${err.message}`);
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+      const enriched = options.map(opt => {
+        const role = guild ? guild.roles.cache.get(opt.role_id) : null;
+        return { ...opt, role_name: role ? role.name : 'Deleted Role', role_color: role ? role.hexColor : '#99aab5' };
+      });
+
+      logger.info(`Role ${roleId} added to self-roles panel ${panelId} via dashboard`);
+      res.json({ success: true, options: enriched });
+    } catch (err) {
+      logger.error('Failed to add role to panel:', err);
+      res.status(500).json({ error: 'Failed to add role' });
+    }
+  });
+
+  // Remove a role from a panel
+  router.delete('/guild/:guildId/self-role-panels/:panelId/roles/:roleId', ensureGuildAccess, async (req, res) => {
+    const { guildId, panelId, roleId } = req.params;
+
+    try {
+      const panel = getPanel(panelId);
+      if (!panel || panel.guild_id !== guildId) return res.status(404).json({ error: 'Panel not found' });
+
+      removeRoleOption(panel.id, roleId);
+      const options = getRoleOptions(panel.id);
+
+      // Update Discord message
+      try {
+        const guild = client.guilds.cache.get(guildId);
+        const channel = await guild.channels.fetch(panel.channel_id);
+        const message = await channel.messages.fetch(panel.message_id);
+        const embed = buildPanelEmbed(panel.title, panel.description, options, guild);
+        const rows = buildPanelButtons(panel.id, options, guild);
+        await message.edit({ embeds: [embed], components: rows });
+      } catch (err) {
+        logger.warn(`Failed to update panel message: ${err.message}`);
+      }
+
+      logger.info(`Role ${roleId} removed from self-roles panel ${panelId} via dashboard`);
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to remove role from panel:', err);
+      res.status(500).json({ error: 'Failed to remove role' });
     }
   });
 

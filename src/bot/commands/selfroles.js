@@ -67,6 +67,8 @@ function buildPanelButtons(panelId, roleOptions, guild) {
 }
 
 module.exports = {
+  buildPanelEmbed,
+  buildPanelButtons,
   data: new SlashCommandBuilder()
     .setName('selfroles')
     .setDescription('Manage self-assignable role panels')

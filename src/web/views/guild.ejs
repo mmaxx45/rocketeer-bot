@@ -64,6 +64,9 @@
       <a class="sidebar-nav-item" href="#section-linkban" data-section="section-linkban">
         <i class="bi bi-link-45deg"></i> Link Ban List
       </a>
+      <a class="sidebar-nav-item" href="#section-selfroles" data-section="section-selfroles">
+        <i class="bi bi-person-badge"></i> Self Roles
+      </a>
       <a class="sidebar-nav-item" href="#section-appeals" data-section="section-appeals">
         <i class="bi bi-person-check"></i> Ban Appeals
       </a>
@@ -551,6 +554,53 @@
         </div>
       </div>
 
+      <!-- Self Roles Section -->
+      <div class="settings-section" id="section-selfroles">
+        <div class="section-header">
+          <i class="bi bi-person-badge"></i>
+          <h5>Self Roles</h5>
+        </div>
+        <div class="section-body">
+          <span class="setting-hint mb-3 d-block">Create role panels with emoji buttons that users can click to assign/remove roles on themselves.</span>
+
+          <!-- Existing Panels -->
+          <div id="selfrole-panels-container">
+            <div class="text-muted mb-3"><i class="bi bi-hourglass-split"></i> Loading panels...</div>
+          </div>
+
+          <!-- Create New Panel -->
+          <div class="card bg-dark border-secondary mt-3">
+            <div class="card-header border-secondary d-flex align-items-center gap-2">
+              <i class="bi bi-plus-circle"></i> <strong>Create New Panel</strong>
+            </div>
+            <div class="card-body">
+              <div class="row g-3">
+                <div class="col-md-4">
+                  <label class="setting-label">Channel</label>
+                  <select id="selfrole-new-channel" class="form-select">
+                    <option value="">-- Select channel --</option>
+                    <% channels.forEach(ch => { %>
+                      <option value="<%= ch.id %>">#<%= ch.name %></option>
+                    <% }); %>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="setting-label">Title</label>
+                  <input type="text" id="selfrole-new-title" class="form-control" value="Self Roles" placeholder="Panel title">
+                </div>
+                <div class="col-md-4">
+                  <label class="setting-label">Description</label>
+                  <input type="text" id="selfrole-new-desc" class="form-control" placeholder="Click a button to toggle a role">
+                </div>
+              </div>
+              <button type="button" class="btn btn-outline-primary mt-3" onclick="createSelfRolePanel('<%= guild.id %>')">
+                <i class="bi bi-plus-lg"></i> Create Panel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Ban Appeals Section -->
       <div class="settings-section" id="section-appeals">
         <div class="section-header">
@@ -814,6 +864,11 @@ Please review the channel list and post in the most appropriate channel moving f
 
   loadFilterWords();
 })();
+
+// Pass guild roles to JS for self-role panel dropdowns
+window.__guildRoles = <%- JSON.stringify(roles) %>;
+// Load self-role panels
+loadSelfRolePanels('<%= guild.id %>');
 </script>
 
 <%- footer %>
