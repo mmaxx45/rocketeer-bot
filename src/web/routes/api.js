@@ -680,6 +680,40 @@ module.exports = function (client) {
     }
   });
 
+  // Update panel title/description
+  router.patch('/guild/:guildId/self-role-panels/:panelId', ensureGuildAccess, async (req, res) => {
+    const { guildId, panelId } = req.params;
+    const { title, description } = req.body;
+    const { getPanel, updatePanel, getRoleOptions } = require('../../database/selfRoles');
+    const { buildPanelEmbed, buildPanelButtons } = require('../../bot/commands/selfroles');
+
+    try {
+      const panel = getPanel(panelId);
+      if (!panel || panel.guild_id !== guildId) return res.status(404).json({ error: 'Panel not found' });
+
+      updatePanel(panelId, title || panel.title, description);
+
+      // Update Discord message
+      try {
+        const guild = client.guilds.cache.get(guildId);
+        const channel = await guild.channels.fetch(panel.channel_id);
+        const message = await channel.messages.fetch(panel.message_id);
+        const options = getRoleOptions(panel.id);
+        const embed = buildPanelEmbed(title || panel.title, description, options, guild);
+        const rows = buildPanelButtons(panel.id, options, guild);
+        await message.edit({ embeds: [embed], components: rows });
+      } catch (err) {
+        logger.warn(`Failed to update panel message: ${err.message}`);
+      }
+
+      logger.info(`Self-roles panel ${panelId} updated via dashboard`);
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to update self-role panel:', err);
+      res.status(500).json({ error: 'Failed to update panel' });
+    }
+  });
+
   // Delete a panel
   router.delete('/guild/:guildId/self-role-panels/:panelId', ensureGuildAccess, async (req, res) => {
     const { guildId, panelId } = req.params;

@@ -288,9 +288,12 @@ async function loadSelfRolePanels(guildId) {
 
       card.innerHTML = `
         <div class="card-header border-secondary d-flex justify-content-between align-items-center">
-          <div>
+          <div class="d-flex align-items-center gap-2 flex-wrap">
             <strong>${escapeHtml(panel.title || 'Self Roles')}</strong>
-            <span class="text-muted ms-2" style="font-size: 0.8rem;">Panel #${panel.id} &bull; #${escapeHtml(panel.channel_id)}</span>
+            <span class="text-muted" style="font-size: 0.8rem;">Panel #${panel.id}</span>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="editPanelDescription('${guildId}', '${panel.id}', this)" title="Edit title & description">
+              <i class="bi bi-pencil"></i>
+            </button>
           </div>
           <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteSelfRolePanel('${guildId}', '${panel.id}')">
             <i class="bi bi-trash"></i> Delete
@@ -440,6 +443,35 @@ async function removeSelfRole(guildId, panelId, roleId, btn) {
     if (result.success) {
       showToast('Role removed.');
       loadSelfRolePanels(guildId); // Refresh
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function editPanelDescription(guildId, panelId, btn) {
+  // Fetch current panel data
+  const card = document.getElementById(`selfrole-panel-${panelId}`);
+  const currentTitle = card.querySelector('strong').textContent;
+
+  const newTitle = prompt('Panel title:', currentTitle);
+  if (newTitle === null) return; // cancelled
+
+  const newDesc = prompt('Panel description (leave empty for default):', '');
+  if (newDesc === null) return; // cancelled
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/self-role-panels/${panelId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle || 'Self Roles', description: newDesc || null }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Panel updated!');
+      loadSelfRolePanels(guildId);
     } else {
       showToast(result.error || 'Failed', 'error');
     }
