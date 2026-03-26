@@ -94,12 +94,18 @@ async function endGiveaway(client, giveaway) {
   const winners = pickWinners(entries, giveaway.winner_count);
   const winnerMentions = winners.map(id => `<@${id}>`);
 
-  markEnded(giveaway.id, JSON.stringify(winners));
-
   // Edit the original message
   try {
     const guild = client.guilds.cache.get(giveaway.guild_id);
-    if (guild) {
+    if (!guild) {
+      logger.warn(`Giveaway ${giveaway.id} expired but guild ${giveaway.guild_id} not in cache yet, will retry`);
+      return [];
+    }
+
+    // Mark ended only after confirming guild is available
+    markEnded(giveaway.id, JSON.stringify(winners));
+
+    {
       const channel = await guild.channels.fetch(giveaway.channel_id);
       if (channel) {
         const message = await channel.messages.fetch(giveaway.message_id);
