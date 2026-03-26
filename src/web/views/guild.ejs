@@ -709,7 +709,7 @@
                   <% const giveawayHosts = JSON.parse(settings.giveaway_host_user_ids || '[]'); %>
                   <% giveawayHosts.forEach(uid => { %>
                     <span class="badge bg-secondary d-flex align-items-center gap-1">
-                      <%= userMap && userMap[uid] ? userMap[uid] : uid %>
+                      <%= uid %>
                       <button type="button" class="btn-close btn-close-white btn-close-sm" onclick="removeGiveawayHost('<%= guild.id %>', '<%= uid %>', this)"></button>
                     </span>
                   <% }); %>
