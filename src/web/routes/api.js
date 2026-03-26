@@ -921,7 +921,7 @@ module.exports = function (client) {
 
   // ========== Giveaways ==========
 
-  const { createGiveaway, setMessageId, getAllForGuild, getGiveaway: getGiveawayById, deleteGiveaway, getEntryCount: giveawayEntryCount } = require('../../database/giveaways');
+  const { createGiveaway, setMessageId, getAllForGuild, getGiveaway: getGiveawayById, deleteGiveaway, updateGiveaway, getEntryCount: giveawayEntryCount } = require('../../database/giveaways');
   const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickWinners } = require('../../bot/commands/giveaway');
   const { EmbedBuilder: GiveawayEmbed } = require('discord.js');
   const { parseDuration, formatDuration } = require('../../bot/utils/parseDuration');
@@ -993,6 +993,58 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to create giveaway:', err);
       res.status(500).json({ error: 'Failed to create giveaway: ' + err.message });
+    }
+  });
+
+  // Edit giveaway
+  router.patch('/guild/:guildId/giveaways/:id', giveawayAccess, async (req, res) => {
+    const giveaway = getGiveawayById(parseInt(req.params.id));
+    if (!giveaway || giveaway.guild_id !== req.params.guildId) {
+      return res.status(404).json({ error: 'Giveaway not found' });
+    }
+
+    const { title, prize, description, color, winnerCount } = req.body;
+    const newTitle = title !== undefined ? title : giveaway.title;
+    const newPrize = prize !== undefined ? prize : giveaway.prize;
+    const newDescription = description !== undefined ? description : giveaway.description;
+    const newColor = color !== undefined ? color : giveaway.color;
+    const newWinnerCount = winnerCount !== undefined ? parseInt(winnerCount) || 1 : giveaway.winner_count;
+
+    if (!newPrize) {
+      return res.status(400).json({ error: 'Prize is required' });
+    }
+
+    try {
+      updateGiveaway(giveaway.id, newTitle, newPrize, newDescription, newColor, newWinnerCount);
+
+      // Update Discord message if active
+      if (!giveaway.ended && giveaway.message_id) {
+        try {
+          const guild = client.guilds.cache.get(giveaway.guild_id);
+          if (guild) {
+            const channel = await guild.channels.fetch(giveaway.channel_id);
+            if (channel) {
+              const message = await channel.messages.fetch(giveaway.message_id);
+              if (message) {
+                const updated = getGiveawayById(giveaway.id);
+                const count = giveawayEntryCount(giveaway.id);
+                await message.edit({
+                  embeds: [buildGiveawayEmbed(updated, count)],
+                  components: buildGiveawayButtons(giveaway.id),
+                });
+              }
+            }
+          }
+        } catch (err) {
+          logger.warn(`Failed to update giveaway message: ${err.message}`);
+        }
+      }
+
+      logger.info(`Giveaway ${giveaway.id} edited via dashboard by ${req.user.username}`);
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('Failed to edit giveaway:', err);
+      res.status(500).json({ error: 'Failed to edit giveaway' });
     }
   });
 

@@ -15,6 +15,7 @@ function getStmts() {
       getAllForGuild: db.prepare(`SELECT * FROM giveaways WHERE guild_id = ? ORDER BY created_at DESC LIMIT 50`),
       getExpired: db.prepare(`SELECT * FROM giveaways WHERE ended = 0 AND ends_at <= datetime('now')`),
       markEnded: db.prepare(`UPDATE giveaways SET ended = 1, winners = ? WHERE id = ?`),
+      update: db.prepare(`UPDATE giveaways SET title = ?, prize = ?, description = ?, color = ?, winner_count = ? WHERE id = ?`),
       delete: db.prepare(`DELETE FROM giveaways WHERE id = ?`),
       addEntry: db.prepare(`INSERT OR IGNORE INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)`),
       removeEntry: db.prepare(`DELETE FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?`),
@@ -67,6 +68,10 @@ function markEnded(giveawayId, winnersJson) {
   return getStmts().markEnded.run(winnersJson, giveawayId);
 }
 
+function updateGiveaway(giveawayId, title, prize, description, color, winnerCount) {
+  return getStmts().update.run(title, prize, description || null, color || null, winnerCount, giveawayId);
+}
+
 function deleteGiveaway(giveawayId) {
   return getStmts().delete.run(giveawayId);
 }
@@ -102,6 +107,7 @@ module.exports = {
   getAllForGuild,
   getExpiredGiveaways,
   markEnded,
+  updateGiveaway,
   deleteGiveaway,
   addEntry,
   removeEntry,

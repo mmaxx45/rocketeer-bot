@@ -649,6 +649,7 @@ async function loadGiveaways(guildId) {
 
       let actions = '';
       if (isActive) {
+        actions += `<button class="btn btn-sm btn-outline-light" onclick="editGiveaway('${guildId}', ${g.id}, this)" data-title="${escapeHtml(g.title || '')}" data-prize="${escapeHtml(g.prize)}" data-description="${escapeHtml(g.description || '')}" data-color="${escapeHtml(g.color || '#5865F2')}" data-winners="${g.winner_count}"><i class="bi bi-pencil"></i> Edit</button> `;
         actions += `<button class="btn btn-sm btn-outline-warning" onclick="endGiveaway('${guildId}', ${g.id})"><i class="bi bi-stop-circle"></i> End</button> `;
       } else {
         actions += `<button class="btn btn-sm btn-outline-info" onclick="rerollGiveaway('${guildId}', ${g.id})"><i class="bi bi-arrow-repeat"></i> Reroll</button> `;
@@ -682,6 +683,43 @@ async function loadGiveaways(guildId) {
     container.innerHTML = html;
   } catch (err) {
     container.innerHTML = `<div class="text-danger">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function editGiveaway(guildId, giveawayId, btn) {
+  const title = prompt('Title:', btn.dataset.title || '🎉 GIVEAWAY 🎉');
+  if (title === null) return;
+  const prize = prompt('Prize:', btn.dataset.prize);
+  if (prize === null) return;
+  if (!prize.trim()) { showToast('Prize is required.', 'error'); return; }
+  const description = prompt('Description (leave empty for none):', btn.dataset.description || '');
+  if (description === null) return;
+  const color = prompt('Color (hex):', btn.dataset.color || '#5865F2');
+  if (color === null) return;
+  const winnerCount = prompt('Number of winners:', btn.dataset.winners || '1');
+  if (winnerCount === null) return;
+
+  try {
+    const res = await fetch(`/api/guild/${guildId}/giveaways/${giveawayId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: title.trim() || '🎉 GIVEAWAY 🎉',
+        prize: prize.trim(),
+        description: description.trim() || null,
+        color: color.trim() || null,
+        winnerCount: parseInt(winnerCount) || 1,
+      }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Giveaway updated!');
+      loadGiveaways(guildId);
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
   }
 }
 
