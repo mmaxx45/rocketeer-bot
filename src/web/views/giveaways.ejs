@@ -1,0 +1,96 @@
+<%- header %>
+
+<div class="container-fluid py-4 px-4">
+  <div class="d-flex align-items-center gap-3 mb-4">
+    <% if (guild.icon) { %>
+      <img src="<%= guild.icon %>" alt="" class="rounded-circle" width="48" height="48">
+    <% } %>
+    <div>
+      <h4 class="mb-0"><%= guild.name %></h4>
+      <span class="text-muted">Giveaway Management</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-8">
+      <!-- Create Giveaway -->
+      <div class="card mb-4" style="background: var(--bg-secondary); border-color: var(--border-primary);">
+        <div class="card-body">
+          <h5 class="mb-3"><i class="bi bi-plus-circle"></i> Create Giveaway</h5>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="mb-3">
+                <label class="form-label">Channel</label>
+                <select id="giveaway-channel" class="form-select">
+                  <% channels.forEach(ch => { %>
+                    <option value="<%= ch.id %>">#<%= ch.name %></option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="mb-3">
+                <label class="form-label">Prize</label>
+                <input type="text" id="giveaway-prize" class="form-control" placeholder="e.g. Nitro Classic">
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4">
+              <div class="mb-3">
+                <label class="form-label">Title</label>
+                <input type="text" id="giveaway-title" class="form-control" placeholder="🎉 GIVEAWAY 🎉">
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="mb-3">
+                <label class="form-label">Duration</label>
+                <input type="text" id="giveaway-duration" class="form-control" placeholder="e.g. 1h, 2d, 30m">
+              </div>
+            </div>
+            <div class="col-md-2">
+              <div class="mb-3">
+                <label class="form-label">Winners</label>
+                <input type="number" id="giveaway-winners" class="form-control" value="1" min="1" max="25">
+              </div>
+            </div>
+            <div class="col-md-2">
+              <div class="mb-3">
+                <label class="form-label">Color</label>
+                <input type="color" id="giveaway-color" class="form-control form-control-color" value="#5865F2">
+              </div>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description (optional)</label>
+            <textarea id="giveaway-description" class="form-control" rows="2" placeholder="Additional details..."></textarea>
+          </div>
+          <button class="btn btn-primary" type="button" onclick="createGiveaway('<%= guild.id %>')">
+            <i class="bi bi-gift"></i> Create Giveaway
+          </button>
+        </div>
+      </div>
+
+      <!-- Active Giveaways -->
+      <div class="card" style="background: var(--bg-secondary); border-color: var(--border-primary);">
+        <div class="card-body">
+          <h5 class="mb-3"><i class="bi bi-list-ul"></i> Giveaways</h5>
+          <div id="giveaways-container">
+            <div class="text-muted"><i class="bi bi-hourglass-split"></i> Loading giveaways...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
+<script src="/js/dashboard.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  loadGiveaways('<%= guild.id %>');
+});
+</script>
+
+<%- footer %>

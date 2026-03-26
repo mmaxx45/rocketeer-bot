@@ -43,6 +43,7 @@ function getStmts() {
         giveaway_host_user_ids: db.prepare(`UPDATE guild_settings SET giveaway_host_user_ids = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         giveaway_log_channel_id: db.prepare(`UPDATE guild_settings SET giveaway_log_channel_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
         giveaway_ping_role_id: db.prepare(`UPDATE guild_settings SET giveaway_ping_role_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
+        giveaway_channel_id: db.prepare(`UPDATE guild_settings SET giveaway_channel_id = ?, updated_at = datetime('now') WHERE guild_id = ?`),
       },
     };
   }

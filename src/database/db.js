@@ -391,6 +391,12 @@ function runMigrations() {
     db.pragma('user_version = 22');
   }
 
+  if (version < 23) {
+    logger.info('Running database migration v23: add giveaway_channel_id');
+    safeAddColumn('guild_settings', 'giveaway_channel_id', 'TEXT DEFAULT NULL');
+    db.pragma('user_version = 23');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

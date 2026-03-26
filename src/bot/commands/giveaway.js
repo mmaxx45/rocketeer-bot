@@ -212,6 +212,11 @@ module.exports = {
       const winnerCount = interaction.options.getInteger('winners') || 1;
       const color = interaction.options.getString('color') || null;
 
+      // Enforce locked giveaway channel
+      if (settings.giveaway_channel_id && channel.id !== settings.giveaway_channel_id) {
+        return interaction.reply({ content: `Giveaways can only be created in <#${settings.giveaway_channel_id}>.`, flags: MessageFlags.Ephemeral });
+      }
+
       const durationMs = parseDuration(durationStr);
       if (!durationMs) {
         return interaction.reply({ content: 'Invalid duration. Examples: `30m`, `1h`, `2d`, `1w`', flags: MessageFlags.Ephemeral });

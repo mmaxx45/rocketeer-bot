@@ -19,6 +19,34 @@ function ensureGuildAccess(req, res, next) {
   next();
 }
 
+function ensureGiveawayAccess(client) {
+  return (req, res, next) => {
+    const guildId = req.params.guildId;
+    // Admins always have access
+    if (userCanManageGuild(req.user, guildId)) return next();
+
+    // Check giveaway host permissions
+    const user = req.user;
+    const userGuild = (user.guilds || []).find(g => g.id === guildId);
+    if (!userGuild) return res.status(403).json({ error: 'Forbidden' });
+
+    const settings = getSettings(guildId);
+    const { getGiveawayHostUsers } = require('../../database/settings');
+    const hostUsers = getGiveawayHostUsers(guildId);
+    if (hostUsers.includes(user.id)) return next();
+
+    if (settings.giveaway_host_role_id) {
+      const botGuild = client.guilds.cache.get(guildId);
+      if (botGuild) {
+        const member = botGuild.members.cache.get(user.id);
+        if (member && member.roles.cache.has(settings.giveaway_host_role_id)) return next();
+      }
+    }
+
+    return res.status(403).json({ error: 'Forbidden' });
+  };
+}
+
 module.exports = function (client) {
   const router = express.Router();
   router.use(ensureAuthenticated);
@@ -26,7 +54,7 @@ module.exports = function (client) {
   // Update guild settings
   router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code, giveaway_host_role_id, giveaway_log_channel_id, giveaway_ping_role_id } = req.body;
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code, giveaway_host_role_id, giveaway_log_channel_id, giveaway_ping_role_id, giveaway_channel_id } = req.body;
 
     try {
       const warnings = [];
@@ -199,6 +227,9 @@ module.exports = function (client) {
       }
       if (giveaway_ping_role_id !== undefined) {
         updateSetting(guildId, 'giveaway_ping_role_id', giveaway_ping_role_id || null);
+      }
+      if (giveaway_channel_id !== undefined) {
+        updateSetting(guildId, 'giveaway_channel_id', giveaway_channel_id || null);
       }
 
       const settings = getSettings(guildId);
@@ -896,7 +927,9 @@ module.exports = function (client) {
   const { parseDuration, formatDuration } = require('../../bot/utils/parseDuration');
 
   // List giveaways
-  router.get('/guild/:guildId/giveaways', ensureGuildAccess, (req, res) => {
+  const giveawayAccess = ensureGiveawayAccess(client);
+
+  router.get('/guild/:guildId/giveaways', giveawayAccess, (req, res) => {
     const { guildId } = req.params;
     try {
       const giveaways = getAllForGuild(guildId).map(g => ({
@@ -911,7 +944,7 @@ module.exports = function (client) {
   });
 
   // Create giveaway
-  router.post('/guild/:guildId/giveaways', ensureGuildAccess, async (req, res) => {
+  router.post('/guild/:guildId/giveaways', giveawayAccess, async (req, res) => {
     const { guildId } = req.params;
     const { channelId, title, prize, description, color, winnerCount, duration } = req.body;
 
@@ -929,6 +962,12 @@ module.exports = function (client) {
     try {
       const guild = client.guilds.cache.get(guildId);
       if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+      // Enforce locked giveaway channel
+      const giveawaySettings = getSettings(guildId);
+      if (giveawaySettings.giveaway_channel_id && channelId !== giveawaySettings.giveaway_channel_id) {
+        return res.status(400).json({ error: `Giveaways can only be created in the designated channel.` });
+      }
 
       const giveaway = createGiveaway(
         guildId, channelId, req.user.id,
@@ -958,7 +997,7 @@ module.exports = function (client) {
   });
 
   // End giveaway
-  router.post('/guild/:guildId/giveaways/:id/end', ensureGuildAccess, async (req, res) => {
+  router.post('/guild/:guildId/giveaways/:id/end', giveawayAccess, async (req, res) => {
     const giveaway = getGiveawayById(parseInt(req.params.id));
     if (!giveaway || giveaway.guild_id !== req.params.guildId) {
       return res.status(404).json({ error: 'Giveaway not found' });
@@ -978,7 +1017,7 @@ module.exports = function (client) {
   });
 
   // Reroll giveaway
-  router.post('/guild/:guildId/giveaways/:id/reroll', ensureGuildAccess, async (req, res) => {
+  router.post('/guild/:guildId/giveaways/:id/reroll', giveawayAccess, async (req, res) => {
     const { getEntries, markEnded: markGiveawayEnded } = require('../../database/giveaways');
     const giveaway = getGiveawayById(parseInt(req.params.id));
     if (!giveaway || giveaway.guild_id !== req.params.guildId) {
@@ -1028,7 +1067,7 @@ module.exports = function (client) {
   });
 
   // Delete giveaway
-  router.delete('/guild/:guildId/giveaways/:id', ensureGuildAccess, async (req, res) => {
+  router.delete('/guild/:guildId/giveaways/:id', giveawayAccess, async (req, res) => {
     const giveaway = getGiveawayById(parseInt(req.params.id));
     if (!giveaway || giveaway.guild_id !== req.params.guildId) {
       return res.status(404).json({ error: 'Giveaway not found' });

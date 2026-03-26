@@ -687,6 +687,18 @@
           <div class="row">
             <div class="col-md-6">
               <div class="setting-item">
+                <label class="setting-label">Giveaway Channel</label>
+                <span class="setting-hint">Lock giveaway creation to a specific channel. Leave empty to allow any channel.</span>
+                <select name="giveaway_channel_id" class="form-select">
+                  <option value="">-- Any channel --</option>
+                  <% channels.forEach(ch => { %>
+                    <option value="<%= ch.id %>" <%= settings.giveaway_channel_id === ch.id ? 'selected' : '' %>>#<%= ch.name %></option>
+                  <% }); %>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="setting-item">
                 <label class="setting-label">Ping Role</label>
                 <span class="setting-hint">Role to ping when a new giveaway starts (optional).</span>
                 <select name="giveaway_ping_role_id" class="form-select">

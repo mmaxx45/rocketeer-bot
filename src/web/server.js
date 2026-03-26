@@ -121,6 +121,7 @@ function createWebServer(client) {
 
   app.use('/auth', require('./routes/auth').router);
   app.use('/dashboard', dashboardLimiter, require('./routes/dashboard')(client));
+  app.use('/giveaways', dashboardLimiter, require('./routes/giveaways')(client));
   app.use('/api', apiLimiter, csrfGuard, require('./routes/api')(client));
 
   app.get('/', (req, res) => {
