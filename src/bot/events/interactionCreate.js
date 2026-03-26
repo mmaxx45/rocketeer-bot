@@ -120,6 +120,13 @@ async function handleButton(interaction) {
     }
 
     try {
+      // Defer immediately to avoid 3-second timeout
+      await interaction.update({
+        content: `Banning <@${pending.targetId}>...`,
+        embeds: [],
+        components: [],
+      });
+
       // DM the banned user BEFORE banning (after ban, bot and user share no guilds)
       await sendBanDM(interaction.client, interaction.guild, pending.targetId, pending.reason, null, settings);
 
@@ -137,10 +144,8 @@ async function handleButton(interaction) {
         logger.warn(`Failed to log mod action: ${err.message}`);
       }
 
-      await interaction.update({
+      await interaction.editReply({
         content: `<@${pending.targetId}> has been banned. All warnings have been preserved in the log.`,
-        embeds: [],
-        components: [],
       });
 
       if (settings.ban_log_channel_id) {
@@ -312,6 +317,14 @@ async function handleButton(interaction) {
     }
 
     try {
+      // Defer immediately to avoid 3-second timeout
+      const durationText = pending.duration ? `${pending.duration} day(s)` : 'Permanent';
+      await interaction.update({
+        content: `Banning <@${pending.targetId}>...`,
+        embeds: [],
+        components: [],
+      });
+
       // DM the banned user BEFORE banning (after ban, bot and user share no guilds)
       await sendBanDM(interaction.client, interaction.guild, pending.targetId, pending.reason, pending.duration ? `${pending.duration} day(s)` : null, banSettings);
 
@@ -345,11 +358,8 @@ async function handleButton(interaction) {
         }
       }
 
-      const durationText = pending.duration ? `${pending.duration} day(s)` : 'Permanent';
-      await interaction.update({
+      await interaction.editReply({
         content: `<@${pending.targetId}> has been banned.\n**Reason:** ${pending.reason}\n**Duration:** ${durationText}`,
-        embeds: [],
-        components: [],
       });
 
       // Post public message in channel
