@@ -11,23 +11,20 @@ const { addModAction } = require('../../database/modactions');
 async function registerCommands(client) {
   const commands = [...client.commands.values()].map(c => c.data.toJSON());
   const rest = new REST({ version: '10' }).setToken(config.discord.token);
-  const devGuildId = process.env.DEV_GUILD_ID;
 
-  if (devGuildId) {
-    logger.info(`Dev mode: registering ${commands.length} command(s) to guild ${devGuildId}...`);
-    await rest.put(
-      Routes.applicationGuildCommands(config.discord.clientId, devGuildId),
-      { body: commands }
-    );
-    logger.info('Guild commands registered.');
-  } else {
-    logger.info(`Dev mode: registering ${commands.length} command(s) globally...`);
-    await rest.put(
-      Routes.applicationCommands(config.discord.clientId),
-      { body: commands }
-    );
-    logger.info('Global commands registered (may take up to 1 hour to propagate).');
+  // Clear guild-specific commands from all guilds to prevent duplicates
+  for (const [guildId] of client.guilds.cache) {
+    try {
+      await rest.put(Routes.applicationGuildCommands(config.discord.clientId, guildId), { body: [] });
+    } catch (err) {
+      logger.warn(`Failed to clear guild commands for ${guildId}: ${err.message}`);
+    }
   }
+
+  // Register all commands globally
+  logger.info(`Registering ${commands.length} command(s) globally...`);
+  await rest.put(Routes.applicationCommands(config.discord.clientId), { body: commands });
+  logger.info('Global commands registered.');
 }
 
 module.exports = {
