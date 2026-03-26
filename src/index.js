@@ -49,6 +49,8 @@ client.login(config.discord.token);
 process.on('SIGINT', async () => {
   logger.info('Shutting down...');
   server.close();
+  const readyHandler = require('./bot/events/ready');
+  if (readyHandler.cleanup) readyHandler.cleanup();
   await client.destroy();
   const { stopCleanup } = require('./database/messages');
   stopCleanup();

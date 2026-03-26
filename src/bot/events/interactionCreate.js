@@ -876,33 +876,27 @@ async function handleButton(interaction) {
     }
 
     const alreadyEntered = hasEntry(giveawayId, interaction.user.id);
+    let message;
 
     if (alreadyEntered) {
       removeEntry(giveawayId, interaction.user.id);
-      const count = getEntryCount(giveawayId);
-      // Update embed entry count
-      try {
-        await interaction.update({
-          embeds: [buildGiveawayEmbed(giveaway, count)],
-          components: buildGiveawayButtons(giveawayId),
-        });
-      } catch {
-        // If update fails, just reply
-      }
-      return interaction.followUp({ content: `You left the giveaway for **${giveaway.prize}**.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      message = `You left the giveaway for **${giveaway.prize}**.`;
     } else {
       addEntry(giveawayId, interaction.user.id);
-      const count = getEntryCount(giveawayId);
-      try {
-        await interaction.update({
-          embeds: [buildGiveawayEmbed(giveaway, count)],
-          components: buildGiveawayButtons(giveawayId),
-        });
-      } catch {
-        // If update fails, just reply
-      }
-      return interaction.followUp({ content: `🎉 You entered the giveaway for **${giveaway.prize}**! Good luck!`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      message = `🎉 You entered the giveaway for **${giveaway.prize}**! Good luck!`;
     }
+
+    const count = getEntryCount(giveawayId);
+    await interaction.deferUpdate();
+    try {
+      await interaction.message.edit({
+        embeds: [buildGiveawayEmbed(giveaway, count)],
+        components: buildGiveawayButtons(giveawayId),
+      });
+    } catch (err) {
+      logger.warn(`Failed to update giveaway embed: ${err.message}`);
+    }
+    return interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 
   if (action === 'giveaway_end_select') {

@@ -60,13 +60,17 @@ module.exports = {
     }
 
     // Start periodic temp ban expiry checker (every 60 seconds)
-    const tempBanInterval = setInterval(() => checkExpiredTempBans(client), 60 * 1000);
+    module.exports._tempBanInterval = setInterval(() => checkExpiredTempBans(client), 60 * 1000);
     checkExpiredTempBans(client);
 
     // Start periodic giveaway expiry checker (every 30 seconds)
-    const giveawayInterval = setInterval(() => checkExpiredGiveaways(client), 30 * 1000);
+    module.exports._giveawayInterval = setInterval(() => checkExpiredGiveaways(client), 30 * 1000);
     checkExpiredGiveaways(client);
 
+  },
+  cleanup() {
+    if (module.exports._tempBanInterval) clearInterval(module.exports._tempBanInterval);
+    if (module.exports._giveawayInterval) clearInterval(module.exports._giveawayInterval);
   },
 };
 

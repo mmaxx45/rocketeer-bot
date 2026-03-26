@@ -7,9 +7,9 @@ function getStmts() {
     stmts = {
       addTempBan: db.prepare(`INSERT INTO temp_bans (guild_id, user_id, moderator_id, reason, duration_days, unban_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+' || ? || ' days'))`),
       getDueTempBans: db.prepare(`SELECT * FROM temp_bans WHERE unbanned = 0 AND unban_at <= datetime('now')`),
-      markUnbanned: db.prepare(`UPDATE temp_bans SET unbanned = 1 WHERE id = ?`),
+      markUnbanned: db.prepare(`UPDATE temp_bans SET unbanned = 1, unbanned_at = datetime('now') WHERE id = ?`),
       getTempBan: db.prepare(`SELECT * FROM temp_bans WHERE guild_id = ? AND user_id = ? AND unbanned = 0 ORDER BY banned_at DESC LIMIT 1`),
-      cancelTempBan: db.prepare(`UPDATE temp_bans SET unbanned = 1 WHERE guild_id = ? AND user_id = ? AND unbanned = 0`),
+      cancelTempBan: db.prepare(`UPDATE temp_bans SET unbanned = 1, unbanned_at = datetime('now') WHERE guild_id = ? AND user_id = ? AND unbanned = 0`),
     };
   }
   return stmts;
