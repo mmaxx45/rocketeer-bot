@@ -1190,23 +1190,24 @@ textarea.form-control {
 .filter-word-item {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 0.35rem 0.65rem;
-  font-size: 0.84rem;
-  transition: all var(--transition-fast);
+  gap: 0.35rem;
+  background: rgba(255,255,255,0.04);
+  border-radius: 100px;
+  padding: 0.25rem 0.55rem 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  transition: background var(--transition-fast);
 }
 
 .filter-word-item:hover {
-  border-color: var(--border-default);
+  background: rgba(255,255,255,0.08);
 }
 
 .filter-words-wrap {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.3rem;
+  padding: 0.5rem 0;
 }
 
 .filter-words-wrap.collapsed {
@@ -2003,17 +2004,22 @@ textarea.form-control {
 }
 
 .filter-word-group {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .filter-word-group-label {
   font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-muted);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
+  padding: 0.4rem 0;
+  user-select: none;
+}
+
+.filter-word-group-label:hover {
+  opacity: 0.8;
 }
 
 .filter-word-delete {
@@ -2022,9 +2028,14 @@ textarea.form-control {
   color: var(--text-muted);
   cursor: pointer;
   padding: 0;
-  font-size: 0.75rem;
+  font-size: 0.6rem;
   line-height: 1;
-  transition: color var(--transition-fast);
+  opacity: 0;
+  transition: all var(--transition-fast);
+}
+
+.filter-word-item:hover .filter-word-delete {
+  opacity: 1;
 }
 
 .filter-word-delete:hover {
