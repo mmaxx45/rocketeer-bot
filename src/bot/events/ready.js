@@ -33,6 +33,13 @@ module.exports = {
   async execute(client) {
     logger.info(`Bot ready as ${client.user.username}, serving ${client.guilds.cache.size} guild(s)`);
 
+    // Snapshot current guilds as the allowlist
+    const { allowedGuilds } = require('./guildCreate');
+    for (const [guildId] of client.guilds.cache) {
+      allowedGuilds.add(guildId);
+    }
+    logger.info(`Guild allowlist locked: ${[...allowedGuilds].join(', ')}`);
+
     // Load status message from the bot's first guild
     let statusMessage = 'DM for help!';
     try {

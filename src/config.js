@@ -28,6 +28,4 @@ module.exports = {
     crosspostWindowHours: 48,
     warningThresholdForBan: 3,
   },
-  // Comma-separated list of allowed guild IDs. If set, bot auto-leaves any guild not on this list.
-  allowedGuildIds: process.env.ALLOWED_GUILD_IDS ? process.env.ALLOWED_GUILD_IDS.split(',').map(s => s.trim()).filter(Boolean) : [],
 };
