@@ -132,9 +132,9 @@ function normalizeForFilter(text) {
   // 6. Strip all non-alphanumeric characters (collapses spaces, punctuation, etc.)
   result = result.replace(/[^a-z0-9]/g, '');
 
-  // 6. Collapse repeated characters (e.g. "niiiiggger" -> "niger" which will match "nigger" pattern)
-  // We keep at most 2 of the same consecutive character to allow legitimate doubles
-  result = result.replace(/(.)\1{2,}/g, '$1$1');
+  // 7. Collapse ALL consecutive repeated characters to single (e.g. "nniiggeerr" -> "niger")
+  // Both content and filter words go through this, so "nigger" -> "niger" matches "niger"
+  result = result.replace(/(.)\1+/g, '$1');
 
   return result;
 }
