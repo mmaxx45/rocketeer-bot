@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const logger = require('../../logger');
 const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
@@ -865,41 +865,30 @@ async function handleButton(interaction) {
 
   // ─── Filter Whitelist Handler ───
 
-  if (action === 'filter_whitelist') {
+  if (action === 'filter_wl_open') {
     const whitelistGuildId = params[0];
-    const matchedWord = decodeURIComponent(params.slice(1).join(':'));
 
-    if (!whitelistGuildId || !matchedWord) {
-      return interaction.reply({ content: 'Invalid whitelist request.', flags: MessageFlags.Ephemeral });
-    }
-
-    // Check moderator permission
     const whitelistSettings = getSettings(whitelistGuildId);
     if (!isModerator(interaction.member, whitelistSettings)) {
       return interaction.reply({ content: 'Only moderators can whitelist words.', flags: MessageFlags.Ephemeral });
     }
 
-    try {
-      addWhitelistWord(whitelistGuildId, matchedWord, interaction.user.id);
+    const modal = new ModalBuilder()
+      .setCustomId(`filter_wl_submit:${whitelistGuildId}`)
+      .setTitle('Whitelist Word')
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('whitelist_word')
+            .setLabel('Word to whitelist (e.g. "respawn")')
+            .setPlaceholder('Enter the full word that caused the false positive')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(100),
+        ),
+      );
 
-      // Update the button to show it was whitelisted
-      await interaction.update({
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`filter_whitelisted:${Date.now()}`)
-              .setLabel(`"${matchedWord}" whitelisted by ${interaction.user.username}`)
-              .setStyle(ButtonStyle.Success)
-              .setDisabled(true),
-          ),
-        ],
-      });
-
-      logger.info(`Filter whitelist: word="${matchedWord}" added by ${interaction.user.username} in guild ${whitelistGuildId}`);
-    } catch (err) {
-      logger.error(`Failed to whitelist word: ${err.message}`);
-      await interaction.reply({ content: `Failed to whitelist: ${err.message}`, flags: MessageFlags.Ephemeral });
-    }
+    await interaction.showModal(modal);
     return;
   }
 
@@ -985,6 +974,26 @@ async function handleCommand(interaction) {
 }
 
 async function handleModalSubmit(interaction) {
+  // ─── Filter Whitelist Modal Submit ───
+  if (interaction.customId.startsWith('filter_wl_submit:')) {
+    const whitelistGuildId = interaction.customId.split(':')[1];
+    const word = interaction.fields.getTextInputValue('whitelist_word').trim().toLowerCase();
+
+    if (!word) {
+      return interaction.reply({ content: 'Please enter a word to whitelist.', flags: MessageFlags.Ephemeral });
+    }
+
+    try {
+      addWhitelistWord(whitelistGuildId, word, interaction.user.id);
+      await interaction.reply({ content: `"${word}" has been added to the word filter whitelist.`, flags: MessageFlags.Ephemeral });
+      logger.info(`Filter whitelist: word="${word}" added by ${interaction.user.username} in guild ${whitelistGuildId}`);
+    } catch (err) {
+      logger.error(`Failed to whitelist word: ${err.message}`);
+      await interaction.reply({ content: `Failed to whitelist: ${err.message}`, flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
   if (!interaction.customId.startsWith('warn_modal:')) return;
 
   const [, targetUserId, messageId, channelId] = interaction.customId.split(':');

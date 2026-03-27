@@ -543,7 +543,7 @@ module.exports = {
                     )
                     .setTimestamp();
                   const whitelistRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`filter_whitelist:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
+                    new ButtonBuilder().setCustomId(`filter_wl_open:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
                   );
                   await logChannel.send({ embeds: [logEmbed], components: [whitelistRow] });
                 }
@@ -582,7 +582,7 @@ module.exports = {
                   }
 
                   const whitelistRow2 = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`filter_whitelist:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
+                    new ButtonBuilder().setCustomId(`filter_wl_open:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
                   );
                   await logChannel.send({ embeds: [logEmbed], components: [whitelistRow2] });
                 }
@@ -608,7 +608,7 @@ module.exports = {
                     )
                     .setTimestamp();
                   const whitelistRow3 = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`filter_whitelist:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
+                    new ButtonBuilder().setCustomId(`filter_wl_open:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
                   );
                   await logChannel.send({ embeds: [logEmbed], components: [whitelistRow3] });
                 }
