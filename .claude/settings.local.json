@@ -8,7 +8,11 @@
       "Bash(\"/c/Program Files/nodejs/npm.cmd\" search passport-discord)",
       "Bash(gh pr:*)",
       "mcp__Claude_Preview__preview_start",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "WebFetch(domain:bahnhofinternet.de)",
+      "WebSearch",
+      "WebFetch(domain:www.dslweb.de)",
+      "WebFetch(domain:www.glasfaser-ruhr.de)"
     ]
   },
   "enabledPlugins": {

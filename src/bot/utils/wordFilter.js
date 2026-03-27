@@ -152,8 +152,23 @@ function normalizeForFilter(text) {
 function checkMessage(content, filterWords, whitelist) {
   if (!content || !filterWords || filterWords.length === 0) return [];
 
-  const normalizedContent = normalizeForFilter(content);
-  if (!normalizedContent) return [];
+  // Split into words and normalize individually for word-boundary awareness
+  const originalWords = content.split(/\s+/).filter(Boolean);
+  const normalizedWords = originalWords.map(w => {
+    const clean = w.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF\u0370-\u03FF]/g, '');
+    return normalizeForFilter(clean);
+  });
+
+  // Build concatenated string with word boundary tracking
+  const wordStarts = [];
+  let concat = '';
+  for (const nw of normalizedWords) {
+    wordStarts.push(concat.length);
+    concat += nw;
+  }
+  wordStarts.push(concat.length); // sentinel
+
+  if (!concat) return [];
 
   // Build set of normalized whitelist words
   const whitelistNormalized = (whitelist || []).map(w => normalizeForFilter(w.word || w)).filter(Boolean);
@@ -165,21 +180,49 @@ function checkMessage(content, filterWords, whitelist) {
     const normalizedWord = normalizeForFilter(entry.word);
     if (!normalizedWord) continue;
 
-    if (!normalizedContent.includes(normalizedWord)) continue;
+    // Check 1: Does the filter word appear in any individual word?
+    let foundInWord = normalizedWords.some(nw => nw.includes(normalizedWord));
+
+    // Check 2: If not found in individual words, check concatenated string
+    // but only match across word boundaries if the spanned words are short
+    // (likely a bypass attempt like "n i g g e r"), not real words like "thing as"
+    if (!foundInWord && concat.includes(normalizedWord)) {
+      const idx = concat.indexOf(normalizedWord);
+      const matchEnd = idx + normalizedWord.length;
+
+      // Find which original words the match spans
+      const spannedWordLengths = [];
+      for (let i = 0; i < normalizedWords.length; i++) {
+        const wStart = wordStarts[i];
+        const wEnd = wordStarts[i + 1];
+        if (wEnd > idx && wStart < matchEnd) {
+          spannedWordLengths.push(originalWords[i].replace(/[^a-zA-Z0-9]/g, '').length);
+        }
+      }
+
+      if (spannedWordLengths.length <= 1) {
+        // Within a single word — real match
+        foundInWord = true;
+      } else {
+        // Spans multiple words — only match if all words are short (≤2 chars = bypass)
+        const allShort = spannedWordLengths.every(len => len <= 2);
+        if (allShort) foundInWord = true;
+      }
+    }
+
+    if (!foundInWord) continue;
 
     // Check if this match is a false positive due to a whitelisted word
     // e.g. "esp" inside "respawn" — if "respawn" is whitelisted, skip
     let isWhitelisted = false;
     for (const wl of whitelistNormalized) {
-      if (wl.includes(normalizedWord) && normalizedContent.includes(wl)) {
+      if (wl.includes(normalizedWord) && concat.includes(wl)) {
         // The filter word appears inside a whitelisted word that's in the content
         // Check if the filter word ONLY appears as part of whitelisted words
-        let remaining = normalizedContent;
-        // Remove all occurrences of the whitelisted word
+        let remaining = concat;
         while (remaining.includes(wl)) {
           remaining = remaining.replace(wl, ' '.repeat(wl.length));
         }
-        // If the filter word no longer appears, it was only inside whitelisted words
         if (!remaining.includes(normalizedWord)) {
           isWhitelisted = true;
           break;
