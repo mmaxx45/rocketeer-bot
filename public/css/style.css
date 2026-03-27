@@ -1203,19 +1203,28 @@ textarea.form-control {
   border-color: var(--border-default);
 }
 
-.filter-word-spoiler {
-  background: var(--bg-overlay);
-  color: transparent;
-  border-radius: 4px;
-  padding: 0 0.3em;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  user-select: none;
+.filter-words-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+  max-height: 2000px;
+  opacity: 1;
 }
 
-.filter-word-spoiler.revealed {
-  background: transparent;
-  color: var(--text-primary);
+.filter-words-wrap.collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+}
+
+.collapse-icon {
+  transform: rotate(-90deg);
+}
+
+.collapse-icon.rotated {
+  transform: rotate(0deg);
 }
 
 /* ===== Toasts ===== */

@@ -950,15 +950,19 @@ Please review the channel list and post in the most appropriate channel moving f
 
       let html = '';
       const tierLabels = { hard: 'Hard Filter', soft: 'Soft Filter', auto_delete: 'Auto Delete' };
+      const tierColors = { hard: 'var(--accent-red)', soft: 'var(--accent-yellow)', auto_delete: 'var(--accent-cyan)' };
       for (const [tier, items] of Object.entries(groups)) {
         if (items.length === 0) continue;
+        const collapsed = items.length > 10;
         html += `<div class="filter-word-group">`;
-        html += `<div class="filter-word-group-label">${tierLabels[tier] || tier} (${items.length})</div>`;
-        html += `<div class="filter-words-container">`;
+        html += `<div class="filter-word-group-label" style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;color:${tierColors[tier] || 'var(--text-muted)'}" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.collapse-icon').classList.toggle('rotated')">
+          <i class="bi bi-chevron-down collapse-icon${collapsed ? '' : ' rotated'}" style="font-size:0.7rem;transition:transform 0.2s"></i>
+          ${tierLabels[tier] || tier} (${items.length})
+        </div>`;
+        html += `<div class="filter-words-wrap${collapsed ? ' collapsed' : ''}">`;
         items.forEach(w => {
           html += `<div class="filter-word-item">
-            <span class="tier-badge-${tier}">${tier}</span>
-            <span class="filter-word-spoiler" onclick="this.classList.toggle('revealed')">${escapeHtml(w.word)}</span>
+            <span>${escapeHtml(w.word)}</span>
             <button type="button" class="filter-word-delete" onclick="removeFilterWord('${guildId}', ${w.id}, this)" title="Remove">
               <i class="bi bi-x-lg"></i>
             </button>
