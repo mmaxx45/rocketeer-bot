@@ -27,6 +27,7 @@ const LEET_MAP = {
   '!': 'i',
   '|': 'i',
   'l': 'i',
+  'j': 'i',
   '+': 't',
   '(': 'c',
   '<': 'c',
@@ -83,6 +84,9 @@ function normalizeForFilter(text) {
   // 2. Lowercase
   result = result.toLowerCase();
 
+  // 2.5. Strip diacritics (é→e, ï→i, ñ→n, etc.)
+  result = result.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
   // 3. Replace homoglyphs
   let normalized = '';
   for (const ch of result) {
@@ -105,7 +109,26 @@ function normalizeForFilter(text) {
   }
   result = normalized;
 
-  // 5. Strip all non-alphanumeric characters (collapses spaces, punctuation, etc.)
+  // 5. Convert fullwidth Latin characters to ASCII (Ｎ→n, ａ→a, etc.)
+  normalized = '';
+  for (const ch of result) {
+    const code = ch.charCodeAt(0);
+    // Fullwidth a-z: 0xFF41-0xFF5A → 0x61-0x7A
+    // Fullwidth A-Z: 0xFF21-0xFF3A → 0x41-0x5A (already lowercased above)
+    // Fullwidth 0-9: 0xFF10-0xFF19 → 0x30-0x39
+    if (code >= 0xFF41 && code <= 0xFF5A) {
+      normalized += String.fromCharCode(code - 0xFF41 + 0x61);
+    } else if (code >= 0xFF21 && code <= 0xFF3A) {
+      normalized += String.fromCharCode(code - 0xFF21 + 0x61);
+    } else if (code >= 0xFF10 && code <= 0xFF19) {
+      normalized += String.fromCharCode(code - 0xFF10 + 0x30);
+    } else {
+      normalized += ch;
+    }
+  }
+  result = normalized;
+
+  // 6. Strip all non-alphanumeric characters (collapses spaces, punctuation, etc.)
   result = result.replace(/[^a-z0-9]/g, '');
 
   // 6. Collapse repeated characters (e.g. "niiiiggger" -> "niger" which will match "nigger" pattern)
