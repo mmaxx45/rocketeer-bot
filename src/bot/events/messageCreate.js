@@ -9,7 +9,7 @@ const { isExempt, isModerator } = require('../utils/permissions');
 const { getBlockedExtensions, isBlockedFile, isBlockedByContentType, isImageAttachment, hasMediaAttachments, getMediaType } = require('../utils/fileFilter');
 const { parseBannedDomains, checkForBannedLinks } = require('../utils/linkFilter');
 const { checkMessage } = require('../utils/wordFilter');
-const { getFilterWords, addFilterViolation, getRecentViolations } = require('../../database/wordFilter');
+const { getFilterWords, addFilterViolation, getRecentViolations, getWhitelist } = require('../../database/wordFilter');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../../database/db');
 const { createThread, getOpenThread, getOpenThreadByChannel, closeThread } = require('../../database/modmail');
@@ -482,7 +482,8 @@ module.exports = {
     if (hasContent && !memberIsExempt && settings.filter_enabled) {
       const filterWords = getFilterWords(guildId);
       if (filterWords.length > 0) {
-        const matches = checkMessage(message.content, filterWords);
+        const whitelist = getWhitelist(guildId);
+        const matches = checkMessage(message.content, filterWords, whitelist);
         if (matches.length > 0) {
           // Use the highest severity match
           const match = matches[0];
@@ -538,9 +539,13 @@ module.exports = {
                       { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
                       { name: 'Matched Word', value: `||${match.word}||`, inline: true },
                       { name: 'Action', value: `Message deleted + Warning #${warningCount} issued`, inline: false },
+                      { name: 'Original Message', value: message.content.length > 1024 ? message.content.slice(0, 1021) + '...' : message.content, inline: false },
                     )
                     .setTimestamp();
-                  await logChannel.send({ embeds: [logEmbed] });
+                  const whitelistRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`filter_whitelist:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
+                  );
+                  await logChannel.send({ embeds: [logEmbed], components: [whitelistRow] });
                 }
               } catch (err) {
                 logger.warn(`Failed to post filter log: ${err.message}`);
@@ -566,6 +571,7 @@ module.exports = {
                       { name: 'Matched Word', value: `||${match.word}||`, inline: true },
                       { name: 'Action', value: 'Message deleted silently', inline: false },
                       { name: 'Violations in Window', value: `${recentCount} / ${threshold} (last ${windowMinutes} min)`, inline: false },
+                      { name: 'Original Message', value: message.content.length > 1024 ? message.content.slice(0, 1021) + '...' : message.content, inline: false },
                     )
                     .setTimestamp();
 
@@ -575,7 +581,10 @@ module.exports = {
                     logEmbed.setDescription(`**Staff notification:** <@${message.author.id}> has reached ${recentCount} soft slur violations in the last ${windowMinutes} minutes.`);
                   }
 
-                  await logChannel.send({ embeds: [logEmbed] });
+                  const whitelistRow2 = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`filter_whitelist:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
+                  );
+                  await logChannel.send({ embeds: [logEmbed], components: [whitelistRow2] });
                 }
               } catch (err) {
                 logger.warn(`Failed to post filter log: ${err.message}`);
@@ -595,9 +604,13 @@ module.exports = {
                       { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
                       { name: 'Matched Word', value: `||${match.word}||`, inline: true },
                       { name: 'Action', value: 'Message auto-deleted', inline: false },
+                      { name: 'Original Message', value: message.content.length > 1024 ? message.content.slice(0, 1021) + '...' : message.content, inline: false },
                     )
                     .setTimestamp();
-                  await logChannel.send({ embeds: [logEmbed] });
+                  const whitelistRow3 = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`filter_whitelist:${guildId}:${encodeURIComponent(match.word)}`).setLabel('Whitelist Word').setStyle(ButtonStyle.Secondary).setEmoji('✅'),
+                  );
+                  await logChannel.send({ embeds: [logEmbed], components: [whitelistRow3] });
                 }
               } catch (err) {
                 logger.warn(`Failed to post filter log: ${err.message}`);

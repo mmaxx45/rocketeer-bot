@@ -18,6 +18,9 @@ function getStmts() {
       getViolations: db.prepare(`SELECT * FROM filter_violations WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`),
       getViolationsCount: db.prepare(`SELECT COUNT(*) as count FROM filter_violations WHERE guild_id = ?`),
       removeWordById: db.prepare(`DELETE FROM word_filter WHERE guild_id = ? AND id = ?`),
+      addWhitelist: db.prepare(`INSERT OR IGNORE INTO filter_whitelist (guild_id, word, added_by) VALUES (?, ?, ?)`),
+      removeWhitelist: db.prepare(`DELETE FROM filter_whitelist WHERE guild_id = ? AND word = ?`),
+      getWhitelist: db.prepare(`SELECT * FROM filter_whitelist WHERE guild_id = ? ORDER BY word`),
     };
   }
   return stmts;
@@ -58,6 +61,18 @@ function getFilterViolations(guildId, limit = 25, offset = 0) {
   return { rows, total };
 }
 
+function addWhitelistWord(guildId, word, addedBy) {
+  return getStmts().addWhitelist.run(guildId, word.toLowerCase(), addedBy || null);
+}
+
+function removeWhitelistWord(guildId, word) {
+  return getStmts().removeWhitelist.run(guildId, word.toLowerCase());
+}
+
+function getWhitelist(guildId) {
+  return getStmts().getWhitelist.all(guildId);
+}
+
 module.exports = {
   addFilterWord,
   removeFilterWord,
@@ -67,4 +82,7 @@ module.exports = {
   addFilterViolation,
   getRecentViolations,
   getFilterViolations,
+  addWhitelistWord,
+  removeWhitelistWord,
+  getWhitelist,
 };

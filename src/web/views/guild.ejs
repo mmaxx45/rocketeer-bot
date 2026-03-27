@@ -523,6 +523,19 @@
               <span class="ms-2" style="color: var(--text-muted); font-size: 0.88rem;">Loading filtered words...</span>
             </div>
           </div>
+
+          <hr class="my-4" style="border-color: var(--border-primary);">
+
+          <!-- Whitelist -->
+          <h6 class="mb-2"><i class="bi bi-shield-check"></i> Whitelisted Words</h6>
+          <span class="setting-hint mb-2 d-block">Words that will never trigger the filter (e.g. "respawn" to prevent false "esp" matches). You can also whitelist directly from the log channel buttons.</span>
+          <div class="input-group mb-2" style="max-width: 400px;">
+            <input type="text" id="whitelist-word-input" class="form-control" placeholder="Word to whitelist">
+            <button class="btn btn-outline-primary" type="button" onclick="addWhitelistWord('<%= guild.id %>')">Add</button>
+          </div>
+          <div id="whitelist-container" class="d-flex flex-wrap gap-1">
+            <div class="text-muted small"><i class="bi bi-hourglass-split"></i> Loading...</div>
+          </div>
         </div>
       </div>
 
@@ -1026,6 +1039,7 @@ window.__guildEmojis = <%- JSON.stringify(emojis) %>;
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof loadSelfRolePanels === 'function') loadSelfRolePanels('<%= guild.id %>');
   if (typeof loadGiveaways === 'function') loadGiveaways('<%= guild.id %>');
+  if (typeof loadWhitelist === 'function') loadWhitelist('<%= guild.id %>');
 });
 </script>
 

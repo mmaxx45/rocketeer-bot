@@ -13,6 +13,7 @@ const { addTempBan } = require('../../database/tempbans');
 const { getAppealById, getAppealByChannel, resolveAppeal } = require('../../database/appeals');
 const { getGiveaway, hasEntry, addEntry, removeEntry, getEntryCount } = require('../../database/giveaways');
 const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway } = require('../commands/giveaway');
+const { addWhitelistWord } = require('../../database/wordFilter');
 
 const DEFAULT_WARN_REASONS = [
   'Spam or flooding',
@@ -858,6 +859,46 @@ async function handleButton(interaction) {
     } catch (err) {
       logger.error(`Failed to reject appeal: ${err.message}`);
       await interaction.reply({ content: `Failed to reject appeal: ${err.message}`, flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  // ─── Filter Whitelist Handler ───
+
+  if (action === 'filter_whitelist') {
+    const whitelistGuildId = params[0];
+    const matchedWord = decodeURIComponent(params.slice(1).join(':'));
+
+    if (!whitelistGuildId || !matchedWord) {
+      return interaction.reply({ content: 'Invalid whitelist request.', flags: MessageFlags.Ephemeral });
+    }
+
+    // Check moderator permission
+    const whitelistSettings = getSettings(whitelistGuildId);
+    if (!isModerator(interaction.member, whitelistSettings)) {
+      return interaction.reply({ content: 'Only moderators can whitelist words.', flags: MessageFlags.Ephemeral });
+    }
+
+    try {
+      addWhitelistWord(whitelistGuildId, matchedWord, interaction.user.id);
+
+      // Update the button to show it was whitelisted
+      await interaction.update({
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`filter_whitelisted:${Date.now()}`)
+              .setLabel(`"${matchedWord}" whitelisted by ${interaction.user.username}`)
+              .setStyle(ButtonStyle.Success)
+              .setDisabled(true),
+          ),
+        ],
+      });
+
+      logger.info(`Filter whitelist: word="${matchedWord}" added by ${interaction.user.username} in guild ${whitelistGuildId}`);
+    } catch (err) {
+      logger.error(`Failed to whitelist word: ${err.message}`);
+      await interaction.reply({ content: `Failed to whitelist: ${err.message}`, flags: MessageFlags.Ephemeral });
     }
     return;
   }

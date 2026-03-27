@@ -5,7 +5,7 @@ const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../..
 const { db } = require('../../database/db');
 const logger = require('../../logger');
 const { userCanManageGuild } = require('../middleware/auth');
-const { addFilterWord, removeFilterWord, removeFilterWordById, getFilterWords } = require('../../database/wordFilter');
+const { addFilterWord, removeFilterWord, removeFilterWordById, getFilterWords, addWhitelistWord, removeWhitelistWord, getWhitelist } = require('../../database/wordFilter');
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) return next();
@@ -562,6 +562,47 @@ module.exports = function (client) {
     } catch (err) {
       logger.error('Failed to remove filter word:', err);
       res.status(500).json({ error: 'Failed to remove filter word' });
+    }
+  });
+
+  // ========== Filter Whitelist ==========
+
+  router.get('/guild/:guildId/filter-whitelist', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    try {
+      const words = getWhitelist(guildId);
+      res.json({ success: true, words });
+    } catch (err) {
+      logger.error('Failed to get filter whitelist:', err);
+      res.status(500).json({ error: 'Failed to get filter whitelist' });
+    }
+  });
+
+  router.post('/guild/:guildId/filter-whitelist', ensureGuildAccess, (req, res) => {
+    const { guildId } = req.params;
+    const { word } = req.body;
+    if (!word || !word.trim()) {
+      return res.status(400).json({ error: 'Word is required' });
+    }
+    try {
+      addWhitelistWord(guildId, word.trim(), req.user ? req.user.id : null);
+      const words = getWhitelist(guildId);
+      res.json({ success: true, words });
+    } catch (err) {
+      logger.error('Failed to add whitelist word:', err);
+      res.status(500).json({ error: 'Failed to add whitelist word' });
+    }
+  });
+
+  router.delete('/guild/:guildId/filter-whitelist/:word', ensureGuildAccess, (req, res) => {
+    const { guildId, word } = req.params;
+    try {
+      removeWhitelistWord(guildId, decodeURIComponent(word));
+      const words = getWhitelist(guildId);
+      res.json({ success: true, words });
+    } catch (err) {
+      logger.error('Failed to remove whitelist word:', err);
+      res.status(500).json({ error: 'Failed to remove whitelist word' });
     }
   });
 

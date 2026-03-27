@@ -116,16 +116,22 @@ function normalizeForFilter(text) {
 
 /**
  * Check message content against a list of filter words.
+ * Whitelisted words cause matches to be skipped when the filter word
+ * appears only as part of a whitelisted word in the original content.
  *
  * @param {string} content - The raw message content
  * @param {Array<{word: string, tier: string}>} filterWords - Words to check against
+ * @param {Array<{word: string}>} [whitelist] - Whitelisted words to skip
  * @returns {Array<{word: string, tier: string}>} - Matches found, ordered by severity (hard first)
  */
-function checkMessage(content, filterWords) {
+function checkMessage(content, filterWords, whitelist) {
   if (!content || !filterWords || filterWords.length === 0) return [];
 
   const normalizedContent = normalizeForFilter(content);
   if (!normalizedContent) return [];
+
+  // Build set of normalized whitelist words
+  const whitelistNormalized = (whitelist || []).map(w => normalizeForFilter(w.word || w)).filter(Boolean);
 
   const matches = [];
   const tierOrder = { hard: 0, soft: 1, auto_delete: 2 };
@@ -134,7 +140,29 @@ function checkMessage(content, filterWords) {
     const normalizedWord = normalizeForFilter(entry.word);
     if (!normalizedWord) continue;
 
-    if (normalizedContent.includes(normalizedWord)) {
+    if (!normalizedContent.includes(normalizedWord)) continue;
+
+    // Check if this match is a false positive due to a whitelisted word
+    // e.g. "esp" inside "respawn" — if "respawn" is whitelisted, skip
+    let isWhitelisted = false;
+    for (const wl of whitelistNormalized) {
+      if (wl.includes(normalizedWord) && normalizedContent.includes(wl)) {
+        // The filter word appears inside a whitelisted word that's in the content
+        // Check if the filter word ONLY appears as part of whitelisted words
+        let remaining = normalizedContent;
+        // Remove all occurrences of the whitelisted word
+        while (remaining.includes(wl)) {
+          remaining = remaining.replace(wl, ' '.repeat(wl.length));
+        }
+        // If the filter word no longer appears, it was only inside whitelisted words
+        if (!remaining.includes(normalizedWord)) {
+          isWhitelisted = true;
+          break;
+        }
+      }
+    }
+
+    if (!isWhitelisted) {
       matches.push({ word: entry.word, tier: entry.tier });
     }
   }

@@ -397,6 +397,22 @@ function runMigrations() {
     db.pragma('user_version = 23');
   }
 
+  if (version < 24) {
+    logger.info('Running database migration v24: filter whitelist');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS filter_whitelist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        word TEXT NOT NULL,
+        added_by TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_whitelist_guild_word ON filter_whitelist(guild_id, word);
+    `);
+    db.pragma('user_version = 24');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

@@ -531,6 +531,67 @@ async function deleteWarning(guildId, warningId) {
   }
 }
 
+// ===== Filter Whitelist =====
+
+async function loadWhitelist(guildId) {
+  const container = document.getElementById('whitelist-container');
+  if (!container) return;
+  try {
+    const res = await fetch(`/api/guild/${guildId}/filter-whitelist`);
+    const result = await res.json();
+    if (!result.success || result.words.length === 0) {
+      container.innerHTML = '<span class="text-muted small">No whitelisted words yet.</span>';
+      return;
+    }
+    container.innerHTML = result.words.map(w =>
+      `<span class="badge bg-success d-flex align-items-center gap-1">${escapeHtml(w.word)} <button type="button" class="btn-close btn-close-white btn-close-sm" onclick="removeWhitelistWord('${guildId}', '${encodeURIComponent(w.word)}', this)"></button></span>`
+    ).join('');
+  } catch (err) {
+    container.innerHTML = `<span class="text-danger small">${escapeHtml(err.message)}</span>`;
+  }
+}
+
+async function addWhitelistWord(guildId) {
+  const input = document.getElementById('whitelist-word-input');
+  const word = input.value.trim();
+  if (!word) { showToast('Enter a word to whitelist.', 'error'); return; }
+  try {
+    const res = await fetch(`/api/guild/${guildId}/filter-whitelist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      input.value = '';
+      showToast(`"${word}" whitelisted.`);
+      loadWhitelist(guildId);
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function removeWhitelistWord(guildId, encodedWord, btn) {
+  try {
+    const res = await fetch(`/api/guild/${guildId}/filter-whitelist/${encodedWord}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const result = await res.json();
+    if (result.success) {
+      btn.closest('.badge').remove();
+      showToast('Whitelist word removed.');
+    } else {
+      showToast(result.error || 'Failed', 'error');
+    }
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
 // ===== Giveaway Management =====
 
 async function addGiveawayHost(guildId) {
