@@ -503,13 +503,17 @@
           <!-- Add Word -->
           <div class="setting-item mt-3">
             <label class="setting-label">Add Filtered Word</label>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 align-items-center">
               <input type="text" id="filter-word-input" class="form-control" placeholder="Enter word..." style="max-width: 250px;">
               <select id="filter-word-tier" class="form-select" style="max-width: 150px;">
                 <option value="hard">Hard</option>
                 <option value="soft">Soft</option>
                 <option value="auto_delete">Auto Delete</option>
               </select>
+              <div class="form-check mb-0">
+                <input type="checkbox" id="filter-word-whole" class="form-check-input">
+                <label class="form-check-label small text-muted" for="filter-word-whole">Exact</label>
+              </div>
               <button type="button" class="btn btn-outline-primary" onclick="addFilterWord('<%= guild.id %>')">
                 <i class="bi bi-plus-lg"></i> Add
               </button>
@@ -961,8 +965,10 @@ Please review the channel list and post in the most appropriate channel moving f
         </div>`;
         html += `<div class="filter-words-wrap${collapsed ? ' collapsed' : ''}">`;
         items.forEach(w => {
+          const exactBadge = w.whole_word ? `<span class="badge bg-info text-dark" style="font-size:0.65rem;cursor:pointer;margin-left:2px" onclick="toggleWholeWord('${guildId}',${w.id},0)" title="Click to disable exact match">EXACT</span>` : '';
+          const exactBtn = !w.whole_word ? `<button type="button" class="filter-word-exact" onclick="toggleWholeWord('${guildId}',${w.id},1)" title="Enable exact match only" style="background:none;border:none;color:var(--text-muted);font-size:0.65rem;padding:0 2px;cursor:pointer;opacity:0.5">exact</button>` : '';
           html += `<div class="filter-word-item">
-            <span>${escapeHtml(w.word)}</span>
+            <span>${escapeHtml(w.word)}</span>${exactBadge}${exactBtn}
             <button type="button" class="filter-word-delete" onclick="removeFilterWord('${guildId}', ${w.id}, this)" title="Remove">
               <i class="bi bi-x-lg"></i>
             </button>
@@ -983,9 +989,29 @@ Please review the channel list and post in the most appropriate channel moving f
     return div.innerHTML;
   }
 
+  window.toggleWholeWord = async function(guildId, wordId, wholeWord) {
+    try {
+      const res = await fetch(`/api/guild/${guildId}/filter-words/${wordId}/whole-word`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wholeWord }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        showToast(wholeWord ? 'Exact match enabled.' : 'Exact match disabled.');
+        loadFilterWords();
+      } else {
+        showToast(result.error || 'Failed', 'error');
+      }
+    } catch (err) {
+      showToast('Failed: ' + err.message, 'error');
+    }
+  };
+
   window.addFilterWord = async function(guildId) {
     const input = document.getElementById('filter-word-input');
     const tierSelect = document.getElementById('filter-word-tier');
+    const wholeWordCheckbox = document.getElementById('filter-word-whole');
     const word = input.value.trim();
     if (!word) return;
 
@@ -993,7 +1019,7 @@ Please review the channel list and post in the most appropriate channel moving f
       const res = await fetch(`/api/guild/${guildId}/filter-words`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word, tier: tierSelect.value }),
+        body: JSON.stringify({ word, tier: tierSelect.value, wholeWord: wholeWordCheckbox.checked }),
       });
       const result = await res.json();
       if (result.success) {

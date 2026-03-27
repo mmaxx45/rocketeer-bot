@@ -184,7 +184,18 @@ function checkMessage(content, filterWords, whitelist) {
     if (!normalizedWord) continue;
 
     // Check 1: Does the filter word appear in any individual word?
-    let foundInWord = normalizedWords.some(nw => nw.includes(normalizedWord));
+    let foundInWord;
+    if (entry.whole_word) {
+      // Whole-word mode: only match if the normalized filter word equals an entire word
+      foundInWord = normalizedWords.some(nw => nw === normalizedWord);
+    } else {
+      foundInWord = normalizedWords.some(nw => nw.includes(normalizedWord));
+    }
+
+    // Whole-word entries skip cross-boundary checks entirely
+    if (entry.whole_word) {
+      if (!foundInWord) continue;
+    }
 
     // Check 2: If not found in individual words, check concatenated string
     // but only match across word boundaries if the spanned words are short

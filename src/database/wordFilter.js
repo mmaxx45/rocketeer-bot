@@ -5,7 +5,8 @@ let stmts;
 function getStmts() {
   if (!stmts) {
     stmts = {
-      addWord: db.prepare(`INSERT OR IGNORE INTO word_filter (guild_id, word, tier) VALUES (?, ?, ?)`),
+      addWord: db.prepare(`INSERT OR IGNORE INTO word_filter (guild_id, word, tier, whole_word) VALUES (?, ?, ?, ?)`),
+      toggleWholeWord: db.prepare(`UPDATE word_filter SET whole_word = ? WHERE guild_id = ? AND id = ?`),
       removeWord: db.prepare(`DELETE FROM word_filter WHERE guild_id = ? AND word = ?`),
       getWords: db.prepare(`SELECT * FROM word_filter WHERE guild_id = ? ORDER BY tier, word`),
       getWordsByTier: db.prepare(`SELECT * FROM word_filter WHERE guild_id = ? AND tier = ? ORDER BY word`),
@@ -26,8 +27,12 @@ function getStmts() {
   return stmts;
 }
 
-function addFilterWord(guildId, word, tier) {
-  return getStmts().addWord.run(guildId, word.toLowerCase(), tier);
+function addFilterWord(guildId, word, tier, wholeWord = 0) {
+  return getStmts().addWord.run(guildId, word.toLowerCase(), tier, wholeWord ? 1 : 0);
+}
+
+function toggleWholeWord(guildId, id, wholeWord) {
+  return getStmts().toggleWholeWord.run(wholeWord ? 1 : 0, guildId, id);
 }
 
 function removeFilterWord(guildId, word) {
@@ -75,6 +80,7 @@ function getWhitelist(guildId) {
 
 module.exports = {
   addFilterWord,
+  toggleWholeWord,
   removeFilterWord,
   removeFilterWordById,
   getFilterWords,

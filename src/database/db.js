@@ -413,6 +413,12 @@ function runMigrations() {
     db.pragma('user_version = 24');
   }
 
+  if (version < 25) {
+    logger.info('Running database migration v25: add whole_word flag to word_filter');
+    safeAddColumn('word_filter', 'whole_word', 'INTEGER DEFAULT 0');
+    db.pragma('user_version = 25');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

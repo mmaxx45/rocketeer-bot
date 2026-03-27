@@ -536,19 +536,34 @@ module.exports = function (client) {
   // Add filter word
   router.post('/guild/:guildId/filter-words', ensureGuildAccess, (req, res) => {
     const { guildId } = req.params;
-    const { word, tier } = req.body;
+    const { word, tier, wholeWord } = req.body;
 
     if (!word || !tier || !['hard', 'soft', 'auto_delete'].includes(tier)) {
       return res.status(400).json({ error: 'Invalid word or tier' });
     }
 
     try {
-      addFilterWord(guildId, word.toLowerCase().trim(), tier);
+      addFilterWord(guildId, word.toLowerCase().trim(), tier, wholeWord ? 1 : 0);
       const words = getFilterWords(guildId);
       res.json({ success: true, words });
     } catch (err) {
       logger.error('Failed to add filter word:', err);
       res.status(500).json({ error: 'Failed to add filter word' });
+    }
+  });
+
+  // Toggle whole_word flag on filter word
+  router.patch('/guild/:guildId/filter-words/:wordId/whole-word', ensureGuildAccess, (req, res) => {
+    const { guildId, wordId } = req.params;
+    const { wholeWord } = req.body;
+    try {
+      const { toggleWholeWord } = require('../../database/wordFilter');
+      toggleWholeWord(guildId, parseInt(wordId, 10), wholeWord ? 1 : 0);
+      const words = getFilterWords(guildId);
+      res.json({ success: true, words });
+    } catch (err) {
+      logger.error('Failed to toggle whole_word:', err);
+      res.status(500).json({ error: 'Failed to toggle whole_word' });
     }
   });
 
