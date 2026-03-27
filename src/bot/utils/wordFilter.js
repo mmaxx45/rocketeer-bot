@@ -168,7 +168,7 @@ function checkMessage(content, filterWords, whitelist) {
   }
 
   // Sort by severity: hard > soft > auto_delete
-  matches.sort((a, b) => (tierOrder[a.tier] || 99) - (tierOrder[b.tier] || 99));
+  matches.sort((a, b) => (tierOrder[a.tier] ?? 99) - (tierOrder[b.tier] ?? 99));
 
   return matches;
 }
