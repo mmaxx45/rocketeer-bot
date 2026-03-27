@@ -92,22 +92,20 @@ module.exports = {
           embeds: [
             new EmbedBuilder()
               .setTitle('Thread Closed')
-              .setDescription(`This modmail thread was closed by <@${interaction.user.id}>.`)
+              .setDescription(`This modmail thread was closed by <@${interaction.user.id}>. This channel will be deleted in 5 seconds.`)
               .setColor(0xE74C3C)
               .setTimestamp(),
           ],
         });
 
-        // Lock the channel
-        try {
-          const closedName = interaction.channel.name.startsWith('closed-') ? interaction.channel.name : `closed-${interaction.channel.name}`;
-          await interaction.channel.setName(closedName.slice(0, 100));
-          await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone.id, {
-            SendMessages: false,
-          });
-        } catch (err) {
-          logger.warn(`Failed to archive modmail channel: ${err.message}`);
-        }
+        // Delete the channel after a brief delay
+        setTimeout(async () => {
+          try {
+            await interaction.channel.delete('Modmail thread closed');
+          } catch (err) {
+            logger.warn(`Failed to delete modmail channel: ${err.message}`);
+          }
+        }, 5000);
 
         logger.info(`Modmail thread closed via command: channel=${interaction.channel.id} closedBy=${interaction.user.username}`);
       } catch (err) {
