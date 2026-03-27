@@ -155,7 +155,7 @@ function checkMessage(content, filterWords, whitelist) {
   // Split into words and normalize individually for word-boundary awareness
   const originalWords = content.split(/\s+/).filter(Boolean);
   const normalizedWords = originalWords.map(w => {
-    const clean = w.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF\u0370-\u03FF]/g, '');
+    const clean = w.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF\u0370-\u03FF\uFF00-\uFFEF]/g, '');
     return normalizeForFilter(clean);
   });
 
@@ -168,7 +168,10 @@ function checkMessage(content, filterWords, whitelist) {
   }
   wordStarts.push(concat.length); // sentinel
 
-  if (!concat) return [];
+  // Also normalize the full raw content (catches cross-boundary repeated chars like "nig ger" → "niger")
+  const fullNormalized = normalizeForFilter(content);
+
+  if (!concat && !fullNormalized) return [];
 
   // Build set of normalized whitelist words
   const whitelistNormalized = (whitelist || []).map(w => normalizeForFilter(w.word || w)).filter(Boolean);
@@ -211,6 +214,16 @@ function checkMessage(content, filterWords, whitelist) {
         const filterLen = normalizedWord.length;
         const allShorter = spannedWordLengths.every(len => len < filterLen);
         if (allShorter) foundInWord = true;
+      }
+    }
+
+    // Check 3: Full normalized content (catches cross-boundary repeated chars
+    // like "nig ger" where concat="nigger" but filter="niger" after collapse)
+    // Only allow if filter word is longer than all individual words (bypass heuristic)
+    if (!foundInWord && fullNormalized.includes(normalizedWord)) {
+      const maxWordLen = Math.max(...normalizedWords.map(w => w.length), 0);
+      if (normalizedWord.length > maxWordLen) {
+        foundInWord = true;
       }
     }
 
