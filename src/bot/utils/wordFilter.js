@@ -204,9 +204,13 @@ function checkMessage(content, filterWords, whitelist) {
         // Within a single word — real match
         foundInWord = true;
       } else {
-        // Spans multiple words — only match if all words are short (≤2 chars = bypass)
-        const allShort = spannedWordLengths.every(len => len <= 2);
-        if (allShort) foundInWord = true;
+        // Spans multiple words — likely a bypass if the filter word is longer
+        // than every individual spanned word (fragments of the full slur).
+        // e.g. "nig ger" → filter "nigger"(6) > "nig"(3) and "ger"(3) → bypass
+        // e.g. "thing as" → filter "nga"(3) < "thing"(5) → not bypass
+        const filterLen = normalizedWord.length;
+        const allShorter = spannedWordLengths.every(len => len < filterLen);
+        if (allShorter) foundInWord = true;
       }
     }
 
