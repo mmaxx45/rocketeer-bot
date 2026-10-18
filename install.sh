@@ -253,21 +253,25 @@ if [ "$WITH_CLI" -eq 1 ]; then
 fi
 
 CONFIG_TARGET_DIR="$CONFIG_DIR"
-if [ "$IS_ROOT" -eq 0 ] && [ "${#AS_ROOT[@]}" -eq 0 ]; then
+if ! mkdir -p "$CONFIG_TARGET_DIR" 2>/dev/null; then
   CONFIG_TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rocketeer"
+  mkdir -p "$CONFIG_TARGET_DIR" 2>/dev/null || true
 fi
 
-step "Writing $CONFIG_TARGET_DIR/config.json"
-mkdir -p "$CONFIG_TARGET_DIR"
-tee "$CONFIG_TARGET_DIR/config.json" >/dev/null <<EOF
+if [ -d "$CONFIG_TARGET_DIR" ] && [ -w "$CONFIG_TARGET_DIR" ]; then
+  step "Writing $CONFIG_TARGET_DIR/config.json"
+  tee "$CONFIG_TARGET_DIR/config.json" >/dev/null <<EOF
 {
   "dir": "$DIR",
   "service": "$SERVICE"
 }
 EOF
+else
+  warn "could not write a CLI config file; pass --dir and --service to rocketeer instead"
+fi
 
 printf '\nRocketeer is installed in %s\n' "$DIR"
-printf '  config     : %s/config.json\n' "$CONFIG_TARGET_DIR"
+printf '  config     : %s\n' "$CONFIG_TARGET_DIR/config.json"
 if [ "$WITH_SERVICE" -eq 1 ]; then
   printf '  service    : systemctl status %s\n' "$SERVICE"
   printf '  logs       : journalctl -u %s -f\n' "$SERVICE"

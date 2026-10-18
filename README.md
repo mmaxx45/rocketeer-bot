@@ -147,6 +147,19 @@ written by the installer (`/etc/rocketeer/config.json`, or
 `~/.config/rocketeer/config.json` for unprivileged installs), and drives systemd with
 `sudo` when you are not root. `--service <name>` overrides the unit name.
 
+### Beta releases
+
+`v1.1.0-beta` is the current prerelease, published as a GitHub pre-release. Install
+it directly with `install.sh --ref v1.1.0-beta`, or follow the beta channel on an
+existing install:
+
+```bash
+rocketeer update --prerelease
+```
+
+Without `--prerelease`, `rocketeer update` follows stable releases only, and while no
+stable release exists it tells you to use `--prerelease` instead.
+
 ### Manual installation
 
 The installer automates the steps below - follow them if you would rather run the bot

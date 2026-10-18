@@ -156,7 +156,17 @@ function haveCommand(command) {
   return probe.status === 0;
 }
 
+let warnedNoSystemctl = false;
+
 function serviceCommand(verb, service, options = {}) {
+  if (!haveCommand('systemctl')) {
+    if (options.required) die('systemctl was not found; this command needs a systemd host');
+    if (!warnedNoSystemctl) {
+      warn('systemctl was not found, skipping service management (pass --no-restart to silence this)');
+      warnedNoSystemctl = true;
+    }
+    return { status: 127 };
+  }
   const needsRoot = process.getuid && process.getuid() !== 0;
   const prefix = needsRoot && haveCommand('sudo') ? ['sudo'] : [];
   return run('systemctl', [...prefix, verb, service], options);
@@ -396,7 +406,7 @@ async function cmdUpdate(flags, config) {
 function cmdServiceVerb(verb, flags, config) {
   const service = resolveService(flags, config);
   step(`${verb} ${service}`);
-  serviceCommand(verb, service);
+  serviceCommand(verb, service, { required: true });
   if (verb !== 'stop') {
     const state = serviceIsActive(service);
     if (state) out(`${service}: ${state}`);

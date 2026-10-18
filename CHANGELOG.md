@@ -12,6 +12,11 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+### Fixed
+
+- `rocketeer update` no longer shells out to `systemctl` on a host without it: it
+  warns once and skips service management instead of printing shell errors.
+
 ## [1.1.0-beta] - 2026-10-18
 
 ### Added
