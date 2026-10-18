@@ -16,6 +16,32 @@ for the people running the bot rather than as a list of commits.
 
 - `rocketeer update` no longer shells out to `systemctl` on a host without it: it
   warns once and skips service management instead of printing shell errors.
+- `rocketeer update` run without sudo on a default install (`/opt` owned by root)
+  could delete the installation, including `.env` and the database, while trying
+  to roll back a backup that was never made. It now checks up front that it can
+  make the backup and asks you to re-run with sudo, and a rollback only ever
+  touches the directory after it has been moved aside.
+- `rocketeer` service commands (`update`, `start`, `stop`, `restart`, `status`,
+  `logs`) failed for non-root users because `sudo` was passed to `systemctl` as an
+  argument. `update` also no longer swaps files while the service could not be
+  stopped, hands the new files back to the previous owner when run as root (a
+  `sudo rocketeer update` used to leave `data/` unwritable for the bot), and
+  watches the service for a few seconds before calling the update healthy.
+- `install.sh` now generates `SESSION_SECRET` in every mode. With
+  `curl ... | bash` there is no terminal, so the dashboard used to run with the
+  example secret from `.env.example`, letting anyone forge a session.
+- `install.sh` writes `.env` values containing `&`, `|`, `\`, quotes or `#`
+  correctly, no longer starts the service while `DISCORD_TOKEN` is a placeholder
+  (it only enables it), restarts the service on a re-run, and writes the CLI
+  config to `/etc/rocketeer` with sudo when needed.
+- A giveaway could be ended (or its claim window expired) twice at once by the
+  scheduler, the End button, `/giveaway end` and the dashboard, announcing two sets
+  of winners. Ending, expiring and rerolling are now serialised per giveaway.
+- Claiming a giveaway prize while the server was unavailable recorded the claim
+  anyway, so retrying said "already claimed". Once every winner has claimed, the
+  giveaway message now updates straight away.
+- Opening a modmail thread for a prize claim when the user's previous modmail
+  channel had been deleted left the stale thread open in the database.
 
 ## [1.1.0-beta] - 2026-10-18
 

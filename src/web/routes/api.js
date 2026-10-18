@@ -978,7 +978,7 @@ module.exports = function (client) {
   // ========== Giveaways ==========
 
   const { createGiveaway, setMessageId, getAllForGuild, getGiveaway: getGiveawayById, deleteGiveaway, updateGiveaway, getEntryCount: giveawayEntryCount } = require('../../database/giveaways');
-  const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickEligibleWinners, beginClaimWindow, dmClaimButtons } = require('../../bot/commands/giveaway');
+  const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickEligibleWinners, beginClaimWindow, dmClaimButtons, withGiveawayLock } = require('../../bot/commands/giveaway');
   const { EmbedBuilder: GiveawayEmbed } = require('discord.js');
   const { parseDuration, formatDuration } = require('../../bot/utils/parseDuration');
 
@@ -1141,6 +1141,9 @@ module.exports = function (client) {
 
     try {
       const winners = await endGiveaway(client, giveaway);
+      if (!winners) {
+        return res.status(409).json({ error: 'Giveaway already ended or is being ended right now' });
+      }
       logger.info(`Giveaway ${giveaway.id} ended via dashboard by ${req.user.username}`);
       res.json({ success: true, winners });
     } catch (err) {
@@ -1171,14 +1174,23 @@ module.exports = function (client) {
         return res.status(400).json({ error: 'Bot is not in that server right now; cannot verify entrants' });
       }
 
-      const newWinners = await pickEligibleWinners(guild, entries, giveaway.winner_count);
+      const rerolled = await withGiveawayLock(giveaway.id, async () => {
+        const picked = await pickEligibleWinners(guild, entries, giveaway.winner_count);
+        if (picked.length === 0) return { newWinners: picked, claimDeadline: null };
+        markGiveawayEnded(giveaway.id, JSON.stringify(picked));
+        const deadline = beginClaimWindow(giveaway.id, giveaway.claim_time, { resetClaims: true });
+        return { newWinners: picked, claimDeadline: deadline };
+      });
+      if (rerolled.busy) {
+        return res.status(409).json({ error: 'Giveaway is being processed right now, try again in a moment' });
+      }
+
+      const { newWinners, claimDeadline } = rerolled.value;
       if (newWinners.length === 0) {
         return res.status(400).json({ error: 'No eligible entries — every entrant has left the server' });
       }
 
       const winnerMentions = newWinners.map(id => `<@${id}>`);
-      markGiveawayEnded(giveaway.id, JSON.stringify(newWinners));
-      const claimDeadline = beginClaimWindow(giveaway.id, giveaway.claim_time, { resetClaims: true });
       const endedView = { ...giveaway, claim_deadline: claimDeadline };
 
       // Update Discord message

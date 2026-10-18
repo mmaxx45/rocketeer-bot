@@ -11,8 +11,8 @@ const { getOpenThreadByChannel, closeThread } = require('../../database/modmail'
 const { getRoleOptions } = require('../../database/selfRoles');
 const { addTempBan } = require('../../database/tempbans');
 const { getAppealById, getAppealByChannel, resolveAppeal } = require('../../database/appeals');
-const { getGiveaway, hasEntry, addEntry, removeEntry, getEntryCount, getClaim, setClaim } = require('../../database/giveaways');
-const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway } = require('../commands/giveaway');
+const { getGiveaway, hasEntry, addEntry, removeEntry, getEntryCount, getClaim, getClaims, setClaim, clearClaimDeadline } = require('../../database/giveaways');
+const { buildGiveawayEmbed, buildEndedEmbed, buildGiveawayButtons, endGiveaway } = require('../commands/giveaway');
 const { openModmailThread } = require('../utils/modmailThread');
 const { addWhitelistWord } = require('../../database/wordFilter');
 
@@ -998,15 +998,36 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'The claim window for this giveaway has expired.', flags: MessageFlags.Ephemeral });
     }
 
+    // Check the guild before recording the claim, so a "try again" really can
+    // be tried again instead of answering "you already claimed".
+    const guild = interaction.guild || interaction.client.guilds.cache.get(giveaway.guild_id);
+    if (!guild) {
+      return interaction.reply({ content: 'The server for this giveaway is not available right now — please try again later.', flags: MessageFlags.Ephemeral });
+    }
+
     setClaim(giveawayId, interaction.user.id, 'claimed');
     logger.info(`Giveaway ${giveawayId} claimed by ${interaction.user.username} in guild ${giveaway.guild_id}`);
 
-    const guild = interaction.guild || interaction.client.guilds.cache.get(giveaway.guild_id);
-    if (!guild) {
-      return interaction.reply({ content: 'The server for this giveaway is not available right now.', flags: MessageFlags.Ephemeral });
-    }
-
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    // Once every current winner has claimed, close the window and show it on
+    // the giveaway message right away rather than at the next sweep.
+    const claimedIds = new Set(getClaims(giveawayId).filter(c => c.status === 'claimed').map(c => c.user_id));
+    if (winners.every(id => claimedIds.has(id))) {
+      clearClaimDeadline(giveawayId);
+      try {
+        const channel = await guild.channels.fetch(giveaway.channel_id);
+        const message = channel && giveaway.message_id ? await channel.messages.fetch(giveaway.message_id) : null;
+        if (message) {
+          await message.edit({
+            embeds: [buildEndedEmbed({ ...giveaway, claim_deadline: null }, winners.map(id => `<@${id}>`))],
+            components: buildGiveawayButtons(giveaway.id, true),
+          });
+        }
+      } catch (err) {
+        logger.warn(`Failed to update giveaway ${giveawayId} after the last claim: ${err.message}`);
+      }
+    }
 
     let modmailChannel = null;
     try {
@@ -1072,6 +1093,9 @@ async function handleSelectMenu(interaction) {
 
     await interaction.update({ content: 'Ending giveaway...', components: [] });
     const winners = await endGiveaway(interaction.client, giveaway);
+    if (!winners) {
+      return interaction.editReply('This giveaway has already ended or is being ended right now.');
+    }
     const winnerText = winners.length > 0 ? winners.map(id => `<@${id}>`).join(', ') : 'No entries';
     await interaction.editReply(`Giveaway for **${giveaway.prize}** ended! Winners: ${winnerText}`);
     return;
