@@ -12,6 +12,20 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+### Fixed
+
+- On Ubuntu the Node.js install could hang with Ctrl+C not working: needrestart's
+  "which services should be restarted?" dialog took over the terminal while its
+  output was hidden. On Debian and Ubuntu the installer now adds the NodeSource
+  repository itself with `apt-get` (no NodeSource setup script, no `apt` warnings)
+  and runs every package step non-interactively with needrestart suspended.
+- The installer waits (up to 15 minutes, and says so) when another package manager
+  such as unattended-upgrades holds the lock, instead of failing or looking stuck,
+  and finishes a previously interrupted `dpkg` run before installing.
+- Installing as a non-root user no longer prints a page of npm `EACCES` errors before
+  retrying the `rocketeer` command install with sudo; `npm ci` output is only shown
+  when it fails.
+
 ## [1.2.1] - 2026-10-19
 
 ### Fixed

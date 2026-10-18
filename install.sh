@@ -137,6 +137,51 @@ quietly() {
   return "$code"
 }
 
+# apt-get without any prompts: no debconf questions, and no needrestart
+# "which services should be restarted?" dialog (Ubuntu), which otherwise takes
+# over the terminal invisibly while the output is captured. Waits for the
+# package lock instead of failing when e.g. unattended-upgrades holds it.
+APT_GET=(env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
+  apt-get -y -q -o DPkg::Lock::Timeout=900
+  -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+
+# Says so when another package manager is running, so a wait is not mistaken
+# for a hang.
+note_package_manager_busy() {
+  local busy
+  busy="$(pgrep -a -x 'apt|apt-get|dpkg|unattended-upgr|packagekitd' 2>/dev/null | grep -v packagekitd | head -n 3 || true)"
+  if [ -n "$busy" ]; then
+    printf '    waiting for another package manager to finish (up to 15 minutes):\n'
+    printf '      %s\n' "$busy"
+  fi
+}
+
+# Debian / Ubuntu: add the NodeSource repository directly (their documented
+# manual setup) instead of running their setup script, which calls `apt`
+# interactively and prints "apt does not have a stable CLI interface".
+install_node_apt() {
+  note_package_manager_busy
+  if [ -n "$(require_root dpkg --audit 2>/dev/null)" ]; then
+    printf '    finishing an interrupted package installation\n'
+    quietly require_root env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 dpkg --configure -a
+  fi
+  printf '    updating package lists\n'
+  quietly require_root "${APT_GET[@]}" update
+  quietly require_root "${APT_GET[@]}" install ca-certificates curl gnupg
+  printf '    adding the NodeSource repository (Node.js %s)\n' "$NODE_INSTALL_MAJOR"
+  require_root mkdir -p /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    | require_root gpg --dearmor --batch --yes -o /etc/apt/keyrings/nodesource.gpg
+  printf 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_%s.x nodistro main\n' "$NODE_INSTALL_MAJOR" \
+    | require_root tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+  # Prefer NodeSource's nodejs over the (older) distribution package.
+  printf 'Package: nodejs\nPin: origin deb.nodesource.com\nPin-Priority: 600\n' \
+    | require_root tee /etc/apt/preferences.d/nodejs >/dev/null
+  printf '    installing nodejs\n'
+  quietly require_root "${APT_GET[@]}" update
+  quietly require_root "${APT_GET[@]}" install nodejs
+}
+
 # Downloads and runs a NodeSource repository setup script as root.
 nodesource_setup() {
   local script
@@ -152,10 +197,7 @@ install_node() {
   fi
   step "Installing Node.js $NODE_INSTALL_MAJOR"
   if command -v apt-get >/dev/null 2>&1; then
-    quietly require_root env DEBIAN_FRONTEND=noninteractive apt-get update
-    quietly require_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
-    nodesource_setup "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x"
-    quietly require_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+    install_node_apt
   elif command -v dnf >/dev/null 2>&1; then
     nodesource_setup "https://rpm.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x"
     quietly require_root dnf install -y nodejs
@@ -317,7 +359,7 @@ fi
 
 as_owner mkdir -p "$DIR/data"
 step "Installing dependencies"
-(cd "$DIR" && as_owner npm ci --omit=dev --no-audit --no-fund)
+(cd "$DIR" && quietly as_owner npm ci --omit=dev --no-audit --no-fund) || die "installing the dependencies failed (output above)"
 
 COMPOSE_FILE="$DIR/docker-compose.yml"
 
@@ -534,8 +576,13 @@ fi
 
 if [ "$WITH_CLI" -eq 1 ]; then
   step "Installing the rocketeer command"
-  if ! (cd "$DIR" && npm install -g . --no-audit --no-fund); then
-    (cd "$DIR" && require_root npm install -g . --no-audit --no-fund) || warn "global install failed; run 'npm install -g .' inside $DIR later"
+  # Use sudo only when npm's global directory is not writable (the usual case
+  # for a system-wide Node.js), instead of failing loudly first.
+  NPM_GLOBAL="$(npm prefix -g 2>/dev/null || true)"
+  if [ -n "$NPM_GLOBAL" ] && [ -w "$NPM_GLOBAL/lib" ] && { [ ! -e "$NPM_GLOBAL/bin" ] || [ -w "$NPM_GLOBAL/bin" ]; }; then
+    (cd "$DIR" && quietly npm install -g . --no-audit --no-fund) || warn "global install failed; run 'npm install -g .' inside $DIR later"
+  else
+    (cd "$DIR" && quietly require_root npm install -g . --no-audit --no-fund) || warn "global install failed; run 'sudo npm install -g .' inside $DIR later"
   fi
 fi
 
