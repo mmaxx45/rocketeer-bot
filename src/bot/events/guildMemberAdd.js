@@ -11,16 +11,18 @@ module.exports = {
       const { db } = require('../../database/db');
 
       // Only send welcome-back for expired temp bans (not manual unbans or appeals)
-      const expiredTempBan = db.prepare(
-        `SELECT * FROM temp_bans WHERE guild_id = ? AND user_id = ? AND unbanned = 1 ORDER BY unbanned_at DESC LIMIT 1`
-      ).get(guildId, member.id);
+      const expiredTempBan = await db.get(
+        `SELECT * FROM temp_bans WHERE guild_id = ? AND user_id = ? AND unbanned = 1 ORDER BY unbanned_at DESC LIMIT 1`,
+        [guildId, member.id]
+      );
 
       if (!expiredTempBan) return;
 
       // Check if this user was unbanned via appeal (don't send welcome back for appeal unbans)
-      const lastAppealAccept = db.prepare(
-        `SELECT * FROM ban_appeals WHERE guild_id = ? AND user_id = ? AND status = 'accepted' ORDER BY resolved_at DESC LIMIT 1`
-      ).get(guildId, member.id);
+      const lastAppealAccept = await db.get(
+        `SELECT * FROM ban_appeals WHERE guild_id = ? AND user_id = ? AND status = 'accepted' ORDER BY resolved_at DESC LIMIT 1`,
+        [guildId, member.id]
+      );
 
       if (lastAppealAccept) return;
 

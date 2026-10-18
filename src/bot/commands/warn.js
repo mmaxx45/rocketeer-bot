@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require('discord.js');
-const { addWarning, getWarnings, getWarningCount } = require('../../database/warnings');
+const { addWarningNumbered, getWarnings } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
 const { canWarn, isExempt } = require('../utils/permissions');
@@ -24,11 +24,13 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!canWarn(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const targetUser = interaction.options.getUser('user');
     const reason = interaction.options.getString('reason');
@@ -36,25 +38,25 @@ module.exports = {
     const timeoutMs = timeoutInput ? parseDuration(timeoutInput) : null;
 
     if (timeoutInput && !timeoutMs) {
-      return interaction.reply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.', flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.' });
     }
 
     if (targetUser.bot) {
-      return interaction.reply({ content: 'You cannot warn a bot.', flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: 'You cannot warn a bot.' });
     }
 
     let targetMember;
     try {
       targetMember = await interaction.guild.members.fetch(targetUser.id);
     } catch {
-      return interaction.reply({ content: 'Could not find that user in this server.', flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: 'Could not find that user in this server.' });
     }
 
     if (isExempt(targetMember, settings)) {
-      return interaction.reply({ content: 'You cannot warn a moderator or someone with a higher role.', flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: 'You cannot warn a moderator or someone with a higher role.' });
     }
 
-    const existingWarnings = getWarnings(interaction.guild.id, targetUser.id);
+    const existingWarnings = await getWarnings(interaction.guild.id, targetUser.id);
     const warningThreshold = settings.warning_threshold || 3;
 
     // Threshold reached - show table with ban/continue buttons
@@ -98,20 +100,18 @@ module.exports = {
       );
       const row = new ActionRowBuilder().addComponents(buttons);
 
-      return interaction.reply({
+      return interaction.editReply({
         content: `**New warning reason:** ${reason}`,
         embeds: [embed],
         components: [row],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
     // Below threshold - issue directly
-    addWarning(interaction.guild.id, targetUser.id, interaction.user.id, reason, 'manual');
-    const newCount = getWarningCount(interaction.guild.id, targetUser.id);
+    const newCount = await addWarningNumbered(interaction.guild.id, targetUser.id, interaction.user.id, reason, 'manual');
 
     try {
-      addModAction(interaction.guild.id, interaction.user.id, 'warn', targetUser.id, reason);
+      await addModAction(interaction.guild.id, interaction.user.id, 'warn', targetUser.id, reason);
     } catch (err) {
       logger.warn(`Failed to log mod action: ${err.message}`);
     }
@@ -125,7 +125,7 @@ module.exports = {
         await targetMember.timeout(timeoutMs, `Warning by ${interaction.user.username}: ${reason}`);
         timeoutApplied = true;
         try {
-          addModAction(interaction.guild.id, interaction.user.id, 'timeout', targetUser.id, `${timeoutLabel} — ${reason}`);
+          await addModAction(interaction.guild.id, interaction.user.id, 'timeout', targetUser.id, `${timeoutLabel} — ${reason}`);
         } catch (err) {
           logger.warn(`Failed to log timeout mod action: ${err.message}`);
         }
@@ -142,9 +142,8 @@ module.exports = {
       replyContent += `\n**Timeout failed:** ${timeoutError}`;
     }
 
-    await interaction.reply({
+    await interaction.editReply({
       content: replyContent,
-      flags: MessageFlags.Ephemeral,
     });
 
     const row = new ActionRowBuilder().addComponents(

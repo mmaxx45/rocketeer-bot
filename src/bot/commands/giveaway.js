@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
-const { createGiveaway, setMessageId, getActiveInChannel, getRecentEndedInChannel, getGiveaway, getEntries, getEntryCount, markEnded, setClaimDeadline, clearClaimDeadline, setClaim, getClaims, clearClaims } = require('../../database/giveaways');
+const { createGiveaway, setMessageId, deleteGiveaway, getActiveInChannel, getRecentEndedInChannel, getGiveaway, getEntries, getEntryCount, setClaimDeadline, clearClaimDeadline, getClaims, clearClaims, recordWinners } = require('../../database/giveaways');
 const { getSettings } = require('../../database/settings');
 const { isModerator } = require('../utils/permissions');
 const { parseDuration, formatDuration } = require('../utils/parseDuration');
@@ -183,103 +183,177 @@ async function pickEligibleWinners(guild, entries, count) {
 
 // Open a claim window for the current winners. Returns the deadline, or null
 // when the giveaway has no claim window or there is nobody to claim.
-function beginClaimWindow(giveawayId, claimTime, { resetClaims = false } = {}) {
-  if (resetClaims) clearClaims(giveawayId);
-  const seconds = Number(claimTime) || 0;
-  if (seconds <= 0) {
-    clearClaimDeadline(giveawayId);
-    return null;
+async function beginClaimWindow(giveawayId, claimTime, { resetClaims = false } = {}) {
+  if (resetClaims) await clearClaims(giveawayId);
+  const deadline = claimDeadlineFor(claimTime);
+  if (deadline) {
+    await setClaimDeadline(giveawayId, deadline);
+  } else {
+    await clearClaimDeadline(giveawayId);
   }
-  const deadline = sqlDatetime(Date.now() + seconds * 1000);
-  setClaimDeadline(giveawayId, deadline);
   return deadline;
 }
 
-async function endGiveaway(client, giveaway) {
-  let winners = [];
+// The claim deadline for a window starting now, or null without a window.
+function claimDeadlineFor(claimTime) {
+  const seconds = Number(claimTime) || 0;
+  return seconds > 0 ? sqlDatetime(Date.now() + seconds * 1000) : null;
+}
 
-  // Edit the original message
+// Ending, expiring, rerolling and claiming a giveaway all await Discord or
+// database calls between reading and writing its state. The 30s sweeper, the
+// End button, the slash commands, the dashboard and the claim button can all
+// hit the same giveaway, so serialise them per giveaway. A single bot process
+// owns the database, so an in-process lock is enough.
+//
+// By default a caller that finds the giveaway busy gets { busy: true } back
+// (ending twice is pointless); with { wait: true } it queues behind the
+// current holder instead (a claim must not be dropped).
+const giveawayLocks = new Map();
+
+async function withGiveawayLock(giveawayId, fn, { wait = false } = {}) {
+  const key = Number(giveawayId);
+  const held = giveawayLocks.get(key);
+  if (held && !wait) return { busy: true };
+  let release;
+  const mine = new Promise(resolve => { release = resolve; });
+  const tail = (held || Promise.resolve()).then(() => mine);
+  giveawayLocks.set(key, tail);
   try {
-    const guild = client.guilds.cache.get(giveaway.guild_id);
-    if (!guild) {
-      logger.warn(`Giveaway ${giveaway.id} expired but guild ${giveaway.guild_id} not in cache yet, will retry`);
-      return [];
+    if (held) await held;
+    return { busy: false, value: await fn() };
+  } finally {
+    release();
+    if (giveawayLocks.get(key) === tail) giveawayLocks.delete(key);
+  }
+}
+
+// True while a caller holds the giveaway (e.g. it is being ended right now).
+function isGiveawayBusy(giveawayId) {
+  return giveawayLocks.has(Number(giveawayId));
+}
+
+// Ends a giveaway. Returns the winners (possibly empty) when this call ended
+// it, or null when nothing was ended: it had already ended, another caller is
+// ending it right now, or its guild is not available yet (the sweeper retries).
+// Throws when writing the result to the database fails.
+async function endGiveaway(client, giveaway) {
+  const result = await withGiveawayLock(giveaway.id, async () => {
+    const fresh = await getGiveaway(giveaway.id);
+    if (!fresh || fresh.ended) return null;
+    return endGiveawayUnlocked(client, fresh);
+  });
+  return result.busy ? null : result.value;
+}
+
+// Fetches the giveaway's message, or null when it is gone or was never posted.
+async function fetchGiveawayMessage(channel, giveaway) {
+  if (!channel || !giveaway.message_id) return null;
+  try {
+    return await channel.messages.fetch(giveaway.message_id);
+  } catch (err) {
+    logger.warn(`Giveaway ${giveaway.id} message ${giveaway.message_id} could not be fetched: ${err.message}`);
+    return null;
+  }
+}
+
+async function fetchGiveawayChannel(guild, giveaway) {
+  try {
+    return await guild.channels.fetch(giveaway.channel_id);
+  } catch (err) {
+    logger.warn(`Giveaway ${giveaway.id} channel ${giveaway.channel_id} could not be fetched: ${err.message}`);
+    return null;
+  }
+}
+
+async function dmPlainWinners(client, guild, giveaway, winnerIds) {
+  for (const winnerId of winnerIds) {
+    try {
+      const user = await client.users.fetch(winnerId);
+      await user.send(`🎉 You won **${giveaway.prize}** in **${guild.name}**! Congratulations!`);
+    } catch {
+      // DMs off or blocked
     }
+  }
+}
 
-    const entries = getEntries(giveaway.id);
-    winners = await pickEligibleWinners(guild, entries, giveaway.winner_count);
-    const winnerMentions = winners.map(id => `<@${id}>`);
+async function endGiveawayUnlocked(client, giveaway) {
+  const guild = client.guilds.cache.get(giveaway.guild_id);
+  if (!guild) {
+    logger.warn(`Giveaway ${giveaway.id} expired but guild ${giveaway.guild_id} not in cache yet, will retry`);
+    return null;
+  }
 
-    // Mark ended only after confirming guild is available
-    markEnded(giveaway.id, JSON.stringify(winners));
+  const entries = await getEntries(giveaway.id);
+  const winners = await pickEligibleWinners(guild, entries, giveaway.winner_count);
+  const winnerMentions = winners.map(id => `<@${id}>`);
 
-    // Open the claim window (null when the giveaway does not require claiming)
-    const claimDeadline = winners.length > 0 ? beginClaimWindow(giveaway.id, giveaway.claim_time) : null;
-    const endedView = { ...giveaway, claim_deadline: claimDeadline };
+  // Winners and the claim window are written together; a failure here throws
+  // and leaves the giveaway running so it can be ended again.
+  const claimDeadline = winners.length > 0 ? claimDeadlineFor(giveaway.claim_time) : null;
+  await recordWinners(giveaway.id, winners, claimDeadline);
+  const endedView = { ...giveaway, claim_deadline: claimDeadline };
 
-    {
-      const channel = await guild.channels.fetch(giveaway.channel_id);
-      if (channel) {
-        const message = await channel.messages.fetch(giveaway.message_id);
-        if (message) {
-          await message.edit({
-            embeds: [buildEndedEmbed(endedView, winnerMentions)],
-            components: buildGiveawayButtons(giveaway.id, true),
-          });
-        }
+  // From here on the giveaway has ended. Each Discord step is independent: a
+  // deleted message or a missing permission must not stop the winners from
+  // being told, or they would lose the prize without ever seeing a claim button.
+  const channel = await fetchGiveawayChannel(guild, giveaway);
+  const message = await fetchGiveawayMessage(channel, giveaway);
+  if (message) {
+    try {
+      await message.edit({
+        embeds: [buildEndedEmbed(endedView, winnerMentions)],
+        components: buildGiveawayButtons(giveaway.id, true),
+      });
+    } catch (err) {
+      logger.warn(`Failed to edit ended giveaway ${giveaway.id} message: ${err.message}`);
+    }
+  }
 
-        // Post winner announcement
-        if (winners.length > 0) {
-          const claimNote = claimDeadline
-            ? ` Check your DMs to claim within **${formatDuration(giveaway.claim_time * 1000)}**.`
-            : '';
-          await channel.send(`🎉 Congratulations ${winnerMentions.join(', ')}! You won **${giveaway.prize}**!${claimNote}`);
-        } else if (entries.length > 0) {
-          await channel.send(`Every entry for **${giveaway.prize}** has left the server — no eligible winners.`);
-        } else {
-          await channel.send(`No one entered the giveaway for **${giveaway.prize}**. No winners.`);
-        }
-      }
-
-      // Log to giveaway log channel
-      const settings = getSettings(giveaway.guild_id);
-      if (settings.giveaway_log_channel_id) {
-        try {
-          const logChannel = await guild.channels.fetch(settings.giveaway_log_channel_id);
-          if (logChannel) {
-            const logEmbed = new EmbedBuilder()
-              .setTitle('Giveaway Ended')
-              .setColor(0x5865F2)
-              .addFields(
-                { name: 'Prize', value: giveaway.prize, inline: true },
-                { name: 'Hosted by', value: `<@${giveaway.host_id}>`, inline: true },
-                { name: 'Entries', value: `${entries.length}`, inline: true },
-                { name: 'Winners', value: winners.length > 0 ? winnerMentions.join(', ') : 'None', inline: false },
-              )
-              .setTimestamp();
-            await logChannel.send({ embeds: [logEmbed] });
-          }
-        } catch (err) {
-          logger.warn(`Failed to post giveaway log: ${err.message}`);
-        }
-      }
-
-      // DM winners: the claim button lives in the DM, like modmail
-      if (claimDeadline) {
-        await dmClaimButtons(client, endedView, winners, claimDeadline);
+  if (channel) {
+    try {
+      if (winners.length > 0) {
+        const claimNote = claimDeadline
+          ? ` Check your DMs to claim within **${formatDuration(giveaway.claim_time * 1000)}**.`
+          : '';
+        await channel.send(`🎉 Congratulations ${winnerMentions.join(', ')}! You won **${giveaway.prize}**!${claimNote}`);
+      } else if (entries.length > 0) {
+        await channel.send(`Every entry for **${giveaway.prize}** has left the server — no eligible winners.`);
       } else {
-        for (const winnerId of winners) {
-          try {
-            const user = await client.users.fetch(winnerId);
-            await user.send(`🎉 You won **${giveaway.prize}** in **${guild.name}**! Congratulations!`);
-          } catch {
-            // DMs off or blocked
-          }
-        }
+        await channel.send(`No one entered the giveaway for **${giveaway.prize}**. No winners.`);
+      }
+    } catch (err) {
+      logger.warn(`Failed to announce winners of giveaway ${giveaway.id}: ${err.message}`);
+    }
+  }
+
+  try {
+    const settings = await getSettings(giveaway.guild_id);
+    if (settings.giveaway_log_channel_id) {
+      const logChannel = await guild.channels.fetch(settings.giveaway_log_channel_id);
+      if (logChannel) {
+        const logEmbed = new EmbedBuilder()
+          .setTitle('Giveaway Ended')
+          .setColor(0x5865F2)
+          .addFields(
+            { name: 'Prize', value: giveaway.prize, inline: true },
+            { name: 'Hosted by', value: `<@${giveaway.host_id}>`, inline: true },
+            { name: 'Entries', value: `${entries.length}`, inline: true },
+            { name: 'Winners', value: winners.length > 0 ? winnerMentions.join(', ') : 'None', inline: false },
+          )
+          .setTimestamp();
+        await logChannel.send({ embeds: [logEmbed] });
       }
     }
   } catch (err) {
-    logger.error(`Failed to end giveaway ${giveaway.id}: ${err.message}`);
+    logger.warn(`Failed to post giveaway log: ${err.message}`);
+  }
+
+  // DM winners: the claim button lives in the DM, like modmail
+  if (claimDeadline) {
+    await dmClaimButtons(client, endedView, winners, claimDeadline);
+  } else {
+    await dmPlainWinners(client, guild, giveaway, winners);
   }
 
   return winners;
@@ -287,9 +361,20 @@ async function endGiveaway(client, giveaway) {
 
 // A claim window elapsed: invalidate every winner who never claimed, then
 // reroll their slots among the remaining feasible entrants. Winners who did
-// claim keep their prize. Returns null when the guild is unavailable so the
-// sweeper retries on its next tick.
+// claim keep their prize.
+// Returns null when the guild is unavailable (the sweeper retries), the claim
+// window is no longer pending, or another caller holds the giveaway.
 async function expireUnclaimedWinners(client, giveaway) {
+  const result = await withGiveawayLock(giveaway.id, async () => {
+    const fresh = await getGiveaway(giveaway.id);
+    if (!fresh || !fresh.ended || !fresh.claim_deadline) return null;
+    if (new Date(fresh.claim_deadline + 'Z').getTime() > Date.now()) return null;
+    return expireUnclaimedWinnersUnlocked(client, fresh);
+  });
+  return result.busy ? null : result.value;
+}
+
+async function expireUnclaimedWinnersUnlocked(client, giveaway) {
   const guild = client.guilds.cache.get(giveaway.guild_id);
   if (!guild) {
     logger.warn(`Giveaway ${giveaway.id} claim window expired but guild ${giveaway.guild_id} not in cache yet, will retry`);
@@ -298,45 +383,42 @@ async function expireUnclaimedWinners(client, giveaway) {
 
   const winners = JSON.parse(giveaway.winners || '[]');
   const claimAction = giveaway.claim_action === 'void' ? 'void' : 'reroll';
-  const claims = getClaims(giveaway.id);
-  const claimed = claims.filter(c => c.status === 'claimed').map(c => c.user_id);
+  const claims = await getClaims(giveaway.id);
+  // Only current winners count as claimed: a stale row (from before a reroll)
+  // must not keep someone in the winner list or eat a slot.
+  const claimed = claims.filter(c => c.status === 'claimed' && winners.includes(c.user_id)).map(c => c.user_id);
   const excluded = new Set(claims.map(c => c.user_id));
   const unclaimed = winners.filter(id => !claimed.includes(id));
 
   if (unclaimed.length === 0) {
-    clearClaimDeadline(giveaway.id);
+    await clearClaimDeadline(giveaway.id);
     return { winners, claimed, expired: [], rerolled: false };
   }
 
-  for (const userId of unclaimed) {
-    setClaim(giveaway.id, userId, 'expired');
-    excluded.add(userId);
-  }
-
+  unclaimed.forEach(userId => excluded.add(userId));
   const slots = Math.max(0, giveaway.winner_count - claimed.length);
-  const pool = getEntries(giveaway.id).filter(id => !excluded.has(id));
+  const pool = (await getEntries(giveaway.id)).filter(id => !excluded.has(id));
   const fresh = claimAction === 'reroll' && slots > 0 ? await pickEligibleWinners(guild, pool, slots) : [];
   const newWinners = [...claimed, ...fresh];
+  const claimDeadline = fresh.length > 0 ? claimDeadlineFor(giveaway.claim_time) : null;
 
-  markEnded(giveaway.id, JSON.stringify(newWinners));
-  let claimDeadline = null;
-  if (fresh.length > 0) {
-    claimDeadline = beginClaimWindow(giveaway.id, giveaway.claim_time);
-  } else {
-    clearClaimDeadline(giveaway.id);
-  }
+  await recordWinners(giveaway.id, newWinners, claimDeadline, { expiredIds: unclaimed });
   const endedView = { ...giveaway, claim_deadline: claimDeadline };
 
-  try {
-    const channel = await guild.channels.fetch(giveaway.channel_id);
-    if (channel) {
-      const message = await channel.messages.fetch(giveaway.message_id);
-      if (message) {
-        await message.edit({
-          embeds: [buildEndedEmbed(endedView, newWinners.map(id => `<@${id}>`))],
-          components: buildGiveawayButtons(giveaway.id, true),
-        });
-      }
+  const channel = await fetchGiveawayChannel(guild, giveaway);
+  const message = await fetchGiveawayMessage(channel, giveaway);
+  if (message) {
+    try {
+      await message.edit({
+        embeds: [buildEndedEmbed(endedView, newWinners.map(id => `<@${id}>`))],
+        components: buildGiveawayButtons(giveaway.id, true),
+      });
+    } catch (err) {
+      logger.warn(`Failed to edit expired-claim giveaway ${giveaway.id} message: ${err.message}`);
+    }
+  }
+  if (channel) {
+    try {
       if (claimAction === 'void') {
         if (newWinners.length > 0) {
           await channel.send(`⌛ The unclaimed winner(s) for **${giveaway.prize}** ran out of time — their win is void.`);
@@ -350,9 +432,9 @@ async function expireUnclaimedWinners(client, giveaway) {
       } else {
         await channel.send(`⌛ No one claimed **${giveaway.prize}** in time and no eligible entrants remain. No winners.`);
       }
+    } catch (err) {
+      logger.warn(`Failed to announce expired claims for giveaway ${giveaway.id}: ${err.message}`);
     }
-  } catch (err) {
-    logger.warn(`Failed to update expired-claim giveaway ${giveaway.id}: ${err.message}`);
   }
 
   logger.info(`Giveaway ${giveaway.id} claim window expired: ${unclaimed.length} winner(s) invalidated, ${fresh.length} rerolled`);
@@ -366,9 +448,12 @@ module.exports = {
   buildGiveawayButtons,
   pickEligibleWinners,
   beginClaimWindow,
+  claimDeadlineFor,
   dmClaimButtons,
   endGiveaway,
   expireUnclaimedWinners,
+  withGiveawayLock,
+  isGiveawayBusy,
 
   data: new SlashCommandBuilder()
     .setName('giveaway')
@@ -399,7 +484,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!canHostGiveaway(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to manage giveaways.', flags: MessageFlags.Ephemeral });
@@ -441,8 +526,9 @@ module.exports = {
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+      let giveaway = null;
       try {
-        const giveaway = createGiveaway(
+        giveaway = await createGiveaway(
           interaction.guild.id, channel.id, interaction.user.id,
           title, prize, description, color, winnerCount, claimSeconds, claimAction, endsAt
         );
@@ -462,19 +548,25 @@ module.exports = {
           components,
         });
 
-        setMessageId(giveaway.id, msg.id);
+        await setMessageId(giveaway.id, msg.id);
+        giveaway.message_id = msg.id;
 
         await interaction.editReply(`Giveaway created in <#${channel.id}>! Prize: **${prize}** — ends in **${formatDuration(durationMs)}**.${claimSeconds ? ` Winners have **${formatDuration(claimSeconds * 1000)}** to claim.` : ''}`);
         logger.info(`Giveaway ${giveaway.id} created by ${interaction.user.username} in guild ${interaction.guild.name}`);
       } catch (err) {
         logger.error(`Failed to create giveaway: ${err.message}`);
+        // Without its message the giveaway could never be entered; do not leave
+        // it running (e.g. the bot cannot post in that channel).
+        if (giveaway && !giveaway.message_id) {
+          await deleteGiveaway(giveaway.id).catch(delErr => logger.warn(`Failed to remove unposted giveaway ${giveaway.id}: ${delErr.message}`));
+        }
         await interaction.editReply(`Failed to create giveaway: ${err.message}`);
       }
       return;
     }
 
     if (subcommand === 'end') {
-      const active = getActiveInChannel(interaction.channel.id);
+      const active = await getActiveInChannel(interaction.channel.id);
 
       if (active.length === 0) {
         return interaction.reply({ content: 'No active giveaways in this channel.', flags: MessageFlags.Ephemeral });
@@ -483,17 +575,20 @@ module.exports = {
       if (active.length === 1) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const winners = await endGiveaway(interaction.client, active[0]);
+        if (!winners) {
+          return interaction.editReply('That giveaway could not be ended right now: it already ended, is being ended, or its server is unavailable.');
+        }
         const winnerText = winners.length > 0 ? winners.map(id => `<@${id}>`).join(', ') : 'No entries';
         await interaction.editReply(`Giveaway for **${active[0].prize}** ended! Winners: ${winnerText}`);
         return;
       }
 
       // Multiple active — show select menu
-      const options = active.slice(0, 25).map(g => ({
+      const options = await Promise.all(active.slice(0, 25).map(async g => ({
         label: g.prize.slice(0, 100),
-        description: `${getEntryCount(g.id)} entries`,
+        description: `${await getEntryCount(g.id)} entries`,
         value: String(g.id),
-      }));
+      })));
 
       const row = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
@@ -507,34 +602,42 @@ module.exports = {
     }
 
     if (subcommand === 'reroll') {
-      const recent = getRecentEndedInChannel(interaction.channel.id);
+      const recent = await getRecentEndedInChannel(interaction.channel.id);
       if (!recent) {
         return interaction.reply({ content: 'No recently ended giveaways in this channel.', flags: MessageFlags.Ephemeral });
       }
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-      const entries = getEntries(recent.id);
+      const entries = await getEntries(recent.id);
       if (entries.length === 0) {
         return interaction.editReply('No entries in the giveaway — cannot reroll.');
       }
 
-      const newWinners = await pickEligibleWinners(interaction.guild, entries, recent.winner_count);
+      const rerolled = await withGiveawayLock(recent.id, async () => {
+        const picked = await pickEligibleWinners(interaction.guild, entries, recent.winner_count);
+        if (picked.length === 0) return { newWinners: picked, claimDeadline: null };
+        const deadline = claimDeadlineFor(recent.claim_time);
+        await recordWinners(recent.id, picked, deadline, { resetClaims: true });
+        return { newWinners: picked, claimDeadline: deadline };
+      });
+      if (rerolled.busy) {
+        return interaction.editReply('That giveaway is being processed right now — try again in a moment.');
+      }
+
+      const { newWinners, claimDeadline } = rerolled.value;
       if (newWinners.length === 0) {
         return interaction.editReply('No eligible entries — every entrant has left the server.');
       }
 
       const winnerMentions = newWinners.map(id => `<@${id}>`);
-
-      markEnded(recent.id, JSON.stringify(newWinners));
-      const claimDeadline = beginClaimWindow(recent.id, recent.claim_time, { resetClaims: true });
       const endedView = { ...recent, claim_deadline: claimDeadline };
 
       // Update embed
       try {
-        const channel = await interaction.guild.channels.fetch(recent.channel_id);
+        const channel = await fetchGiveawayChannel(interaction.guild, recent);
         if (channel) {
-          const message = await channel.messages.fetch(recent.message_id);
+          const message = await fetchGiveawayMessage(channel, recent);
           if (message) {
             await message.edit({
               embeds: [buildEndedEmbed(endedView, winnerMentions)],

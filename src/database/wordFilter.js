@@ -1,81 +1,65 @@
 const { db } = require('./db');
 
-let stmts;
-
-function getStmts() {
-  if (!stmts) {
-    stmts = {
-      addWord: db.prepare(`INSERT OR IGNORE INTO word_filter (guild_id, word, tier, whole_word) VALUES (?, ?, ?, ?)`),
-      toggleWholeWord: db.prepare(`UPDATE word_filter SET whole_word = ? WHERE guild_id = ? AND id = ?`),
-      removeWord: db.prepare(`DELETE FROM word_filter WHERE guild_id = ? AND word = ?`),
-      getWords: db.prepare(`SELECT * FROM word_filter WHERE guild_id = ? ORDER BY tier, word`),
-      getWordsByTier: db.prepare(`SELECT * FROM word_filter WHERE guild_id = ? AND tier = ? ORDER BY word`),
-      addViolation: db.prepare(`INSERT INTO filter_violations (guild_id, user_id, word_matched, tier, message_content, channel_id) VALUES (?, ?, ?, ?, ?, ?)`),
-      getRecentViolations: db.prepare(`
-        SELECT COUNT(*) as count FROM filter_violations
-        WHERE guild_id = ? AND user_id = ? AND tier = 'soft'
-          AND created_at > datetime('now', '-' || ? || ' minutes')
-      `),
-      getViolations: db.prepare(`SELECT * FROM filter_violations WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`),
-      getViolationsCount: db.prepare(`SELECT COUNT(*) as count FROM filter_violations WHERE guild_id = ?`),
-      removeWordById: db.prepare(`DELETE FROM word_filter WHERE guild_id = ? AND id = ?`),
-      addWhitelist: db.prepare(`INSERT OR IGNORE INTO filter_whitelist (guild_id, word, added_by) VALUES (?, ?, ?)`),
-      removeWhitelist: db.prepare(`DELETE FROM filter_whitelist WHERE guild_id = ? AND word = ?`),
-      getWhitelist: db.prepare(`SELECT * FROM filter_whitelist WHERE guild_id = ? ORDER BY word`),
-    };
-  }
-  return stmts;
-}
-
 function addFilterWord(guildId, word, tier, wholeWord = 0) {
-  return getStmts().addWord.run(guildId, word.toLowerCase(), tier, wholeWord ? 1 : 0);
+  return db.run(
+    `INSERT OR IGNORE INTO word_filter (guild_id, word, tier, whole_word) VALUES (?, ?, ?, ?)`,
+    [guildId, word.toLowerCase(), tier, wholeWord ? 1 : 0]
+  );
 }
 
 function toggleWholeWord(guildId, id, wholeWord) {
-  return getStmts().toggleWholeWord.run(wholeWord ? 1 : 0, guildId, id);
+  return db.run(`UPDATE word_filter SET whole_word = ? WHERE guild_id = ? AND id = ?`, [wholeWord ? 1 : 0, guildId, id]);
 }
 
 function removeFilterWord(guildId, word) {
-  return getStmts().removeWord.run(guildId, word.toLowerCase());
+  return db.run(`DELETE FROM word_filter WHERE guild_id = ? AND word = ?`, [guildId, word.toLowerCase()]);
 }
 
 function removeFilterWordById(guildId, id) {
-  return getStmts().removeWordById.run(guildId, id);
+  return db.run(`DELETE FROM word_filter WHERE guild_id = ? AND id = ?`, [guildId, id]);
 }
 
 function getFilterWords(guildId) {
-  return getStmts().getWords.all(guildId);
+  return db.all(`SELECT * FROM word_filter WHERE guild_id = ? ORDER BY tier, word`, [guildId]);
 }
 
 function getFilterWordsByTier(guildId, tier) {
-  return getStmts().getWordsByTier.all(guildId, tier);
+  return db.all(`SELECT * FROM word_filter WHERE guild_id = ? AND tier = ? ORDER BY word`, [guildId, tier]);
 }
 
 function addFilterViolation(guildId, userId, wordMatched, tier, messageContent, channelId) {
-  return getStmts().addViolation.run(guildId, userId, wordMatched, tier, messageContent, channelId);
+  return db.run(
+    `INSERT INTO filter_violations (guild_id, user_id, word_matched, tier, message_content, channel_id) VALUES (?, ?, ?, ?, ?, ?)`,
+    [guildId, userId, wordMatched, tier, messageContent, channelId]
+  );
 }
 
-function getRecentViolations(guildId, userId, minutes) {
-  return getStmts().getRecentViolations.get(guildId, userId, minutes).count;
+async function getRecentViolations(guildId, userId, minutes) {
+  const row = await db.get(
+    `SELECT COUNT(*) as count FROM filter_violations
+     WHERE guild_id = ? AND user_id = ? AND tier = 'soft'
+       AND created_at > datetime('now', '-' || ? || ' minutes')`,
+    [guildId, userId, minutes]
+  );
+  return row.count;
 }
 
-function getFilterViolations(guildId, limit = 25, offset = 0) {
-  const s = getStmts();
-  const rows = s.getViolations.all(guildId, limit, offset);
-  const total = s.getViolationsCount.get(guildId).count;
+async function getFilterViolations(guildId, limit = 25, offset = 0) {
+  const rows = await db.all(`SELECT * FROM filter_violations WHERE guild_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`, [guildId, limit, offset]);
+  const { count: total } = await db.get(`SELECT COUNT(*) as count FROM filter_violations WHERE guild_id = ?`, [guildId]);
   return { rows, total };
 }
 
 function addWhitelistWord(guildId, word, addedBy) {
-  return getStmts().addWhitelist.run(guildId, word.toLowerCase(), addedBy || null);
+  return db.run(`INSERT OR IGNORE INTO filter_whitelist (guild_id, word, added_by) VALUES (?, ?, ?)`, [guildId, word.toLowerCase(), addedBy || null]);
 }
 
 function removeWhitelistWord(guildId, word) {
-  return getStmts().removeWhitelist.run(guildId, word.toLowerCase());
+  return db.run(`DELETE FROM filter_whitelist WHERE guild_id = ? AND word = ?`, [guildId, word.toLowerCase()]);
 }
 
 function getWhitelist(guildId) {
-  return getStmts().getWhitelist.all(guildId);
+  return db.all(`SELECT * FROM filter_whitelist WHERE guild_id = ? ORDER BY word`, [guildId]);
 }
 
 module.exports = {

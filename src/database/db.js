@@ -1,445 +1,300 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+'use strict';
+
+// Database access for both backends. Every query goes through the async API
+// below (get / all / run / insert / exec / transaction) with SQLite-flavoured
+// SQL and `?` placeholders; on Postgres the SQL is translated by ./dialect.
+
 const fs = require('fs');
+const path = require('path');
 const config = require('../config');
 const logger = require('../logger');
+const dialect = require('./dialect');
 
-const dbDir = path.dirname(path.resolve(config.database.path));
-fs.mkdirSync(dbDir, { recursive: true });
+// The SQLite migrations in ./migrations end at this version; a Postgres
+// database reaches it through the snapshot plus POSTGRES_MIGRATIONS.
+const SCHEMA_VERSION = 27;
 
-const db = new Database(path.resolve(config.database.path));
+// schema.postgres.sql is a snapshot of the schema at this version. A fresh
+// Postgres database is created from it and then migrated forward, so the
+// snapshot never has to be regenerated when a migration is added.
+const POSTGRES_SNAPSHOT_VERSION = 26;
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Postgres schema changes after the snapshot. Each entry runs once, in a
+// transaction, when the database is older than its version:
+//   { version: 27, description: '...', up: async (tx) => { await tx.exec('ALTER TABLE ...'); } }
+// Add the matching SQLite migration to ./migrations and bump SCHEMA_VERSION.
+const POSTGRES_MIGRATIONS = [
+  {
+    version: 27,
+    description: 'dashboard sessions, one open modmail thread per user',
+    up: async tx => {
+      await tx.exec(`
+        CREATE TABLE IF NOT EXISTS web_sessions (
+          sid TEXT PRIMARY KEY,
+          sess TEXT NOT NULL,
+          expires_at BIGINT NOT NULL
+        );
 
-function columnExists(table, column) {
-  const cols = db.pragma(`table_info(${table})`);
-  return cols.some(c => c.name === column);
+        CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at);
+
+        UPDATE modmail_threads SET status = 'closed', closed_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+        WHERE status = 'open' AND id NOT IN (
+          SELECT MAX(id) FROM modmail_threads WHERE status = 'open' GROUP BY guild_id, user_id
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_modmail_one_open ON modmail_threads(guild_id, user_id) WHERE status = 'open';
+      `);
+    },
+  },
+];
+
+const client = config.database.client === 'postgres' ? 'postgres' : 'sqlite';
+
+let sqliteHandle = null;
+let pgPool = null;
+// Set by close(): the getters below would otherwise reopen the database for
+// handlers still finishing during shutdown.
+let closed = false;
+const sqliteStatements = new Map();
+
+function sqlite() {
+  if (closed) throw new Error('the database is closed');
+  if (!sqliteHandle) {
+    const Database = require('better-sqlite3');
+    const file = path.resolve(config.database.path);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    sqliteHandle = new Database(file);
+    sqliteHandle.pragma('journal_mode = WAL');
+    sqliteHandle.pragma('foreign_keys = ON');
+  }
+  return sqliteHandle;
 }
 
-function safeAddColumn(table, column, type) {
-  if (!columnExists(table, column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+function postgres() {
+  if (closed) throw new Error('the database is closed');
+  if (!pgPool) {
+    const { Pool, types } = require('pg');
+    // COUNT(*) and SUM() come back as int8 / numeric, which pg returns as
+    // strings to avoid precision loss. Every count here fits in a JS number,
+    // and callers compare and add them like SQLite's numbers.
+    types.setTypeParser(types.builtins.INT8, value => parseInt(value, 10));
+    types.setTypeParser(types.builtins.NUMERIC, value => parseFloat(value));
+
+    const settings = config.database;
+    pgPool = new Pool({
+      connectionString: settings.url || undefined,
+      host: settings.url ? undefined : settings.host,
+      port: settings.url ? undefined : settings.port,
+      database: settings.url ? undefined : settings.name,
+      user: settings.url ? undefined : settings.user,
+      password: settings.url ? undefined : settings.password,
+      max: settings.poolSize || 10,
+      // Fail instead of hanging forever when the server is unreachable.
+      connectionTimeoutMillis: 10000,
+      ssl: settings.ssl ? { rejectUnauthorized: settings.ssl !== 'no-verify' } : undefined,
+    });
+    pgPool.on('error', err => logger.error(`Postgres pool error: ${err.message}`));
+  }
+  return pgPool;
+}
+
+function statement(sql) {
+  let prepared = sqliteStatements.get(sql);
+  if (!prepared) {
+    prepared = sqlite().prepare(sql);
+    sqliteStatements.set(sql, prepared);
+  }
+  return prepared;
+}
+
+function withReturningId(sql) {
+  return /\breturning\b/i.test(sql) ? sql : sql.replace(/[\s;]*$/, '') + ' RETURNING id';
+}
+
+// The SQL strings are static, so translate each one once.
+const postgresSql = new Map();
+
+function toPostgres(sql) {
+  let translated = postgresSql.get(sql);
+  if (translated === undefined) {
+    translated = dialect.toPostgres(sql);
+    postgresSql.set(sql, translated);
+  }
+  return translated;
+}
+
+// Query helpers bound to one Postgres connection (the pool, or a client that
+// holds an open transaction).
+function postgresApi(connection) {
+  const query = (sql, params = []) => connection.query(toPostgres(sql), params);
+  return {
+    async get(sql, params) {
+      return (await query(sql, params)).rows[0];
+    },
+    async all(sql, params) {
+      return (await query(sql, params)).rows;
+    },
+    async run(sql, params) {
+      const result = await query(sql, params);
+      return { changes: result.rowCount, lastInsertRowid: result.rows[0] ? result.rows[0].id : undefined };
+    },
+    async insert(sql, params) {
+      const result = await query(withReturningId(sql), params);
+      return result.rows[0] ? result.rows[0].id : undefined;
+    },
+    async exec(sql) {
+      await connection.query(sql);
+    },
+  };
+}
+
+const sqliteApi = {
+  async get(sql, params = []) {
+    return statement(sql).get(...params);
+  },
+  async all(sql, params = []) {
+    return statement(sql).all(...params);
+  },
+  async run(sql, params = []) {
+    const info = statement(sql).run(...params);
+    return { changes: info.changes, lastInsertRowid: info.lastInsertRowid };
+  },
+  async insert(sql, params = []) {
+    return statement(sql).run(...params).lastInsertRowid;
+  },
+  async exec(sql) {
+    sqlite().exec(sql);
+  },
+};
+
+function api() {
+  return client === 'postgres' ? postgresApi(postgres()) : sqliteApi;
+}
+
+// async so that every failure, including a closed database, is a rejection
+// rather than a synchronous throw.
+const get = async (sql, params) => api().get(sql, params);
+const all = async (sql, params) => api().all(sql, params);
+const run = async (sql, params) => api().run(sql, params);
+const insert = async (sql, params) => api().insert(sql, params);
+const exec = async sql => api().exec(sql);
+
+// SQLite has a single connection, so transactions are serialised here: a
+// second BEGIN while one is open would fail. Statements issued outside a
+// transaction while one is awaiting still run on the same connection.
+let sqliteTransactionQueue = Promise.resolve();
+
+// Runs fn(tx) in a transaction; tx has get / all / run / insert / exec.
+// Commits when fn resolves, rolls back when it throws.
+async function transaction(fn) {
+  if (client === 'postgres') {
+    const connection = await postgres().connect();
+    try {
+      await connection.query('BEGIN');
+      const result = await fn(postgresApi(connection));
+      await connection.query('COMMIT');
+      return result;
+    } catch (err) {
+      await connection.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+
+  const previous = sqliteTransactionQueue;
+  let release;
+  sqliteTransactionQueue = new Promise(resolve => { release = resolve; });
+  await previous;
+  const handle = sqlite();
+  try {
+    handle.exec('BEGIN IMMEDIATE');
+    try {
+      const result = await fn(sqliteApi);
+      handle.exec('COMMIT');
+      return result;
+    } catch (err) {
+      if (handle.inTransaction) handle.exec('ROLLBACK');
+      throw err;
+    }
+  } finally {
+    release();
   }
 }
 
-function runMigrations() {
-  const version = db.pragma('user_version', { simple: true });
-
-  if (version < 1) {
-    logger.info('Running database migration v1: initial schema');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS guild_settings (
-        guild_id TEXT PRIMARY KEY,
-        moderator_role_id TEXT,
-        crosspost_threshold INTEGER DEFAULT 80,
-        crosspost_window_hours INTEGER DEFAULT 48,
-        warning_threshold INTEGER DEFAULT 3,
-        exempt_channels TEXT DEFAULT '[]',
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE TABLE IF NOT EXISTS warnings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        moderator_id TEXT NOT NULL,
-        reason TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('manual', 'crosspost')),
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_warnings_guild_user ON warnings(guild_id, user_id);
-      CREATE INDEX IF NOT EXISTS idx_warnings_created ON warnings(created_at);
-
-      CREATE TABLE IF NOT EXISTS crosspost_incidents (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        original_channel_id TEXT NOT NULL,
-        original_message_content TEXT,
-        crosspost_channel_id TEXT NOT NULL,
-        crosspost_message_content TEXT,
-        similarity_score REAL NOT NULL,
-        action_taken TEXT NOT NULL CHECK(action_taken IN ('deleted', 'warned')),
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_crosspost_guild_user ON crosspost_incidents(guild_id, user_id);
-
-      CREATE TABLE IF NOT EXISTS message_cache (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        channel_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        message_id TEXT NOT NULL UNIQUE,
-        content TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_message_cache_lookup ON message_cache(guild_id, user_id, channel_id);
-      CREATE INDEX IF NOT EXISTS idx_message_cache_created ON message_cache(created_at);
-    `);
-    db.pragma('user_version = 1');
-  }
-
-  if (version < 2) {
-    logger.info('Running database migration v2: add warn_log_channel_id');
-    safeAddColumn('guild_settings', 'warn_log_channel_id', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 2');
-  }
-
-  if (version < 3) {
-    logger.info('Running database migration v3: add warn_role_id');
-    safeAddColumn('guild_settings', 'warn_role_id', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 3');
-  }
-
-  if (version < 4) {
-    logger.info('Running database migration v4: add custom message columns');
-    safeAddColumn('guild_settings', 'crosspost_first_message', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'crosspost_repeat_message', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'warn_public_message', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 4');
-  }
-
-  if (version < 5) {
-    logger.info('Running database migration v5: add crosspost_detection_seconds');
-    safeAddColumn('guild_settings', 'crosspost_detection_seconds', 'INTEGER DEFAULT 30');
-    db.pragma('user_version = 5');
-  }
-
-  if (version < 6) {
-    logger.info('Running database migration v6: add ban_log_channel_id');
-    safeAddColumn('guild_settings', 'ban_log_channel_id', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 6');
-  }
-
-  if (version < 7) {
-    logger.info('Running database migration v7: new features batch');
-    safeAddColumn('guild_settings', 'crosspost_kick_count', 'INTEGER DEFAULT 3');
-    safeAddColumn('guild_settings', 'crosspost_kick_window_minutes', 'INTEGER DEFAULT 60');
-    safeAddColumn('guild_settings', 'ban_role_id', 'TEXT DEFAULT NULL');
-    safeAddColumn('warnings', 'message_content', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'modmail_enabled', 'INTEGER DEFAULT 0');
-    safeAddColumn('guild_settings', 'modmail_category_id', 'TEXT DEFAULT NULL');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS modmail_threads (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        channel_id TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
-        created_at TEXT DEFAULT (datetime('now')),
-        closed_at TEXT DEFAULT NULL,
-        closed_by TEXT DEFAULT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_modmail_guild_user ON modmail_threads(guild_id, user_id);
-      CREATE INDEX IF NOT EXISTS idx_modmail_channel ON modmail_threads(channel_id);
-      CREATE INDEX IF NOT EXISTS idx_modmail_status ON modmail_threads(status);
-    `);
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS mod_actions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        moderator_id TEXT NOT NULL,
-        action_type TEXT NOT NULL,
-        target_id TEXT NOT NULL,
-        details TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_mod_actions_guild_mod ON mod_actions(guild_id, moderator_id);
-      CREATE INDEX IF NOT EXISTS idx_mod_actions_guild_target ON mod_actions(guild_id, target_id);
-      CREATE INDEX IF NOT EXISTS idx_mod_actions_type ON mod_actions(guild_id, action_type);
-    `);
-    safeAddColumn('guild_settings', 'modactions_role_id', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'file_block_enabled', 'INTEGER DEFAULT 1');
-    safeAddColumn('guild_settings', 'blocked_extensions', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 7');
-  }
-
-  if (version < 8) {
-    logger.info('Running database migration v8: add banreason_role_id and custom_warn_reasons');
-    safeAddColumn('guild_settings', 'banreason_role_id', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'custom_warn_reasons', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 8');
-  }
-
-  if (version < 9) {
-    logger.info('Running database migration v9: add bot_status_message');
-    safeAddColumn('guild_settings', 'bot_status_message', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 9');
-  }
-
-  if (version < 10) {
-    logger.info('Running database migration v10: licensing tickets');
-    safeAddColumn('guild_settings', 'ticket_category_id', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'ticket_admin_role_id', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'ticket_log_channel_id', 'TEXT DEFAULT NULL');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS license_tickets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        channel_id TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
-        created_at TEXT DEFAULT (datetime('now')),
-        closed_at TEXT DEFAULT NULL,
-        closed_by TEXT DEFAULT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_license_tickets_guild_user ON license_tickets(guild_id, user_id);
-      CREATE INDEX IF NOT EXISTS idx_license_tickets_channel ON license_tickets(channel_id);
-      CREATE INDEX IF NOT EXISTS idx_license_tickets_status ON license_tickets(guild_id, status);
-    `);
-    db.pragma('user_version = 10');
-  }
-
-  if (version < 11) {
-    logger.info('Running database migration v11: add loader_file_name');
-    safeAddColumn('guild_settings', 'loader_file_name', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 11');
-  }
-
-  if (version < 12) {
-    logger.info('Running database migration v12: add ticket_open_message');
-    safeAddColumn('guild_settings', 'ticket_open_message', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 12');
-  }
-
-  if (version < 13) {
-    logger.info('Running database migration v13: add license_required_role_ids');
-    safeAddColumn('guild_settings', 'license_required_role_ids', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 13');
-  }
-
-  if (version < 14) {
-    logger.info('Running database migration v14: add license_role_prices');
-    safeAddColumn('guild_settings', 'license_role_prices', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 14');
-  }
-
-  if (version < 15) {
-    logger.info('Running database migration v15: add banned_domains');
-    safeAddColumn('guild_settings', 'banned_domains', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 15');
-  }
-
-  if (version < 16) {
-    logger.info('Running database migration v16: word filter system');
-    safeAddColumn('guild_settings', 'filter_enabled', 'INTEGER DEFAULT 1');
-    safeAddColumn('guild_settings', 'soft_slur_threshold', 'INTEGER DEFAULT 3');
-    safeAddColumn('guild_settings', 'soft_slur_window_minutes', 'INTEGER DEFAULT 60');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS word_filter (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        word TEXT NOT NULL,
-        tier TEXT NOT NULL CHECK(tier IN ('hard', 'soft', 'auto_delete')),
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_word_filter_guild_word ON word_filter(guild_id, word);
-      CREATE INDEX IF NOT EXISTS idx_word_filter_guild_tier ON word_filter(guild_id, tier);
-
-      CREATE TABLE IF NOT EXISTS filter_violations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        word_matched TEXT NOT NULL,
-        tier TEXT NOT NULL,
-        message_content TEXT,
-        channel_id TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_filter_violations_guild_user ON filter_violations(guild_id, user_id);
-      CREATE INDEX IF NOT EXISTS idx_filter_violations_created ON filter_violations(created_at);
-    `);
-    db.pragma('user_version = 16');
-  }
-
-  if (version < 17) {
-    logger.info('Running database migration v17: add image_only_channels');
-    safeAddColumn('guild_settings', 'image_only_channels', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 17');
-  }
-
-  if (version < 18) {
-    logger.info('Running database migration v18: self-assignable roles');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS self_role_panels (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        channel_id TEXT NOT NULL,
-        message_id TEXT NOT NULL,
-        title TEXT DEFAULT 'Self Roles',
-        description TEXT DEFAULT NULL,
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_self_role_panels_guild ON self_role_panels(guild_id);
-      CREATE INDEX IF NOT EXISTS idx_self_role_panels_message ON self_role_panels(message_id);
-
-      CREATE TABLE IF NOT EXISTS self_role_options (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        panel_id INTEGER NOT NULL REFERENCES self_role_panels(id) ON DELETE CASCADE,
-        role_id TEXT NOT NULL,
-        label TEXT DEFAULT NULL,
-        emoji TEXT DEFAULT NULL,
-        description TEXT DEFAULT NULL,
-        sort_order INTEGER DEFAULT 0
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_self_role_options_panel ON self_role_options(panel_id);
-    `);
-    db.pragma('user_version = 18');
-  }
-
-  if (version < 19) {
-    logger.info('Running database migration v19: temp_bans table');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS temp_bans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        moderator_id TEXT NOT NULL,
-        reason TEXT,
-        duration_days INTEGER NOT NULL,
-        banned_at TEXT DEFAULT (datetime('now')),
-        unban_at TEXT NOT NULL,
-        unbanned INTEGER DEFAULT 0
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_temp_bans_due ON temp_bans(guild_id, unbanned, unban_at);
-    `);
-    db.pragma('user_version = 19');
-  }
-
-  if (version < 20) {
-    logger.info('Running database migration v20: ban appeals system');
-    safeAddColumn('guild_settings', 'appeal_category_id', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'appeal_enabled', 'INTEGER DEFAULT 0');
-    safeAddColumn('guild_settings', 'server_invite_code', 'TEXT DEFAULT NULL');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS ban_appeals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        channel_id TEXT,
-        reason TEXT,
-        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')),
-        moderator_id TEXT,
-        created_at TEXT DEFAULT (datetime('now')),
-        resolved_at TEXT DEFAULT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_ban_appeals_guild_user ON ban_appeals(guild_id, user_id);
-      CREATE INDEX IF NOT EXISTS idx_ban_appeals_channel ON ban_appeals(channel_id);
-      CREATE INDEX IF NOT EXISTS idx_ban_appeals_status ON ban_appeals(guild_id, status);
-    `);
-    db.pragma('user_version = 20');
-  }
-
-  if (version < 21) {
-    logger.info('Running database migration v21: add unbanned_at to temp_bans');
-    safeAddColumn('temp_bans', 'unbanned_at', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 21');
-  }
-
-  if (version < 22) {
-    logger.info('Running database migration v22: giveaway system');
-    safeAddColumn('guild_settings', 'giveaway_host_role_id', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'giveaway_host_user_ids', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'giveaway_log_channel_id', 'TEXT DEFAULT NULL');
-    safeAddColumn('guild_settings', 'giveaway_ping_role_id', 'TEXT DEFAULT NULL');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS giveaways (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        channel_id TEXT NOT NULL,
-        message_id TEXT,
-        host_id TEXT NOT NULL,
-        title TEXT DEFAULT '🎉 GIVEAWAY 🎉',
-        prize TEXT NOT NULL,
-        description TEXT,
-        color TEXT DEFAULT NULL,
-        winner_count INTEGER DEFAULT 1,
-        winners TEXT DEFAULT NULL,
-        ends_at TEXT NOT NULL,
-        ended INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_giveaways_guild ON giveaways(guild_id, ended);
-      CREATE INDEX IF NOT EXISTS idx_giveaways_expires ON giveaways(ended, ends_at);
-      CREATE INDEX IF NOT EXISTS idx_giveaways_channel ON giveaways(channel_id, ended);
-
-      CREATE TABLE IF NOT EXISTS giveaway_entries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        giveaway_id INTEGER NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
-        user_id TEXT NOT NULL,
-        entered_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_giveaway_entries_unique ON giveaway_entries(giveaway_id, user_id);
-      CREATE INDEX IF NOT EXISTS idx_giveaway_entries_giveaway ON giveaway_entries(giveaway_id);
-    `);
-    db.pragma('user_version = 22');
-  }
-
-  if (version < 23) {
-    logger.info('Running database migration v23: add giveaway_channel_id');
-    safeAddColumn('guild_settings', 'giveaway_channel_id', 'TEXT DEFAULT NULL');
-    db.pragma('user_version = 23');
-  }
-
-  if (version < 24) {
-    logger.info('Running database migration v24: filter whitelist');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS filter_whitelist (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        word TEXT NOT NULL,
-        added_by TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_whitelist_guild_word ON filter_whitelist(guild_id, word);
-    `);
-    db.pragma('user_version = 24');
-  }
-
-  if (version < 25) {
-    logger.info('Running database migration v25: add whole_word flag to word_filter');
-    safeAddColumn('word_filter', 'whole_word', 'INTEGER DEFAULT 0');
-    db.pragma('user_version = 25');
-  }
-
-  if (version < 26) {
-    logger.info('Running database migration v26: giveaway claim window');
-    safeAddColumn('giveaways', 'claim_time', 'INTEGER DEFAULT NULL');
-    safeAddColumn('giveaways', 'claim_deadline', 'TEXT DEFAULT NULL');
-    safeAddColumn('giveaways', 'claim_action', "TEXT DEFAULT 'reroll'");
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS giveaway_claims (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        giveaway_id INTEGER NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
-        user_id TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('claimed', 'expired')),
-        updated_at TEXT DEFAULT (datetime('now'))
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_giveaway_claims_unique ON giveaway_claims(giveaway_id, user_id);
-      CREATE INDEX IF NOT EXISTS idx_giveaway_claims_status ON giveaway_claims(giveaway_id, status);
-    `);
-    db.pragma('user_version = 26');
-  }
-
-  logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
+async function ping() {
+  await get('SELECT 1 AS ok');
+  return true;
 }
 
-module.exports = { db, runMigrations };
+async function runMigrations() {
+  if (client === 'postgres') return runPostgresMigrations();
+  const { runSqliteMigrations } = require('./migrations');
+  runSqliteMigrations(sqlite(), logger);
+}
+
+async function readPostgresVersion(pool) {
+  await pool.query('CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  const found = await pool.query("SELECT value FROM app_meta WHERE key = 'schema_version'");
+  return found.rows[0] ? parseInt(found.rows[0].value, 10) : 0;
+}
+
+const SET_VERSION = "INSERT INTO app_meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value";
+
+async function runPostgresMigrations() {
+  const pool = postgres();
+  let current = await readPostgresVersion(pool);
+
+  if (current === 0) {
+    logger.info(`Creating the Postgres schema (version ${POSTGRES_SNAPSHOT_VERSION})`);
+    const schema = fs.readFileSync(path.join(__dirname, 'schema.postgres.sql'), 'utf8');
+    await transaction(async tx => {
+      // Two processes starting at once (e.g. the installer check and the
+      // service) must not both create the schema.
+      await tx.exec('LOCK TABLE app_meta IN EXCLUSIVE MODE');
+      const again = await tx.get("SELECT value FROM app_meta WHERE key = 'schema_version'");
+      if (again) return;
+      await tx.exec(schema);
+      await tx.run(SET_VERSION, [String(POSTGRES_SNAPSHOT_VERSION)]);
+    });
+    current = await readPostgresVersion(pool);
+  }
+
+  for (const migration of POSTGRES_MIGRATIONS) {
+    if (migration.version <= current) continue;
+    logger.info(`Running Postgres migration v${migration.version}: ${migration.description}`);
+    await transaction(async tx => {
+      await migration.up(tx);
+      await tx.run(SET_VERSION, [String(migration.version)]);
+    });
+    current = migration.version;
+  }
+
+  if (current > SCHEMA_VERSION) {
+    logger.warn(`Database schema version ${current} is newer than this build (${SCHEMA_VERSION}); was the bot downgraded?`);
+  }
+  logger.info(`Database at schema version ${current} (postgres)`);
+}
+
+async function close() {
+  closed = true;
+  if (pgPool) {
+    const pool = pgPool;
+    pgPool = null;
+    await pool.end();
+  }
+  if (sqliteHandle) {
+    sqliteHandle.close();
+    sqliteHandle = null;
+    sqliteStatements.clear();
+  }
+}
+
+// True when err is a unique-constraint violation on either backend.
+function isUniqueViolation(err) {
+  return Boolean(err) && (err.code === '23505' || err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY');
+}
+
+const db = { client, get, all, run, insert, exec, transaction, ping, runMigrations, close, isUniqueViolation, SCHEMA_VERSION };
+
+module.exports = { db, runMigrations, close };

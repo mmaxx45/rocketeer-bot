@@ -1,11 +1,12 @@
 const express = require('express');
+const { asyncRouter } = require('../asyncHandler');
 const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getSettings } = require('../../database/settings');
 const { createAppeal, getOpenAppeal } = require('../../database/appeals');
 const logger = require('../../logger');
 
 module.exports = function (client) {
-  const router = express.Router();
+  const router = asyncRouter();
 
   // GET /appeal/:guildId — public appeal form
   router.get('/:guildId', async (req, res) => {
@@ -22,7 +23,7 @@ module.exports = function (client) {
         });
       }
 
-      const settings = getSettings(guildId);
+      const settings = await getSettings(guildId);
       if (!settings.appeal_enabled || !settings.appeal_category_id) {
         return res.status(403).render('appeal', {
           title: 'Appeal Ban',
@@ -55,10 +56,10 @@ module.exports = function (client) {
     const { user_id, reason } = req.body;
 
     // Validate input
-    if (!user_id || !/^\d{17,20}$/.test(user_id)) {
+    if (typeof user_id !== 'string' || !/^\d{17,20}$/.test(user_id)) {
       return res.status(400).json({ error: 'Please enter a valid Discord User ID (17-20 digits).' });
     }
-    if (!reason || reason.trim().length === 0) {
+    if (typeof reason !== 'string' || reason.trim().length === 0) {
       return res.status(400).json({ error: 'Please provide a reason for your appeal.' });
     }
     if (reason.length > 1000) {
@@ -71,7 +72,7 @@ module.exports = function (client) {
         return res.status(404).json({ error: 'Server not found.' });
       }
 
-      const settings = getSettings(guildId);
+      const settings = await getSettings(guildId);
       if (!settings.appeal_enabled || !settings.appeal_category_id) {
         return res.status(403).json({ error: 'Ban appeals are not enabled on this server.' });
       }
@@ -86,7 +87,7 @@ module.exports = function (client) {
       }
 
       // Check for existing open appeal
-      const existingAppeal = getOpenAppeal(guildId, user_id);
+      const existingAppeal = await getOpenAppeal(guildId, user_id);
       if (existingAppeal) {
         return res.status(409).json({ error: 'You already have a pending appeal. Please wait for a moderator to review it.' });
       }
@@ -123,7 +124,7 @@ module.exports = function (client) {
       });
 
       // Record appeal in database
-      const appealId = createAppeal(guildId, user_id, channel.id, banReason);
+      const appealId = await createAppeal(guildId, user_id, channel.id, banReason);
 
       // Build the appeal info embed
       const appealEmbed = new EmbedBuilder()

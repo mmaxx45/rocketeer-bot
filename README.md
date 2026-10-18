@@ -87,14 +87,20 @@ curl -fsSL https://raw.githubusercontent.com/mmaxx45/rocketeer-bot/main/install.
 
 `install.sh` needs no git checkout: it downloads the latest GitHub release into
 `/opt/rocketeer`, installs the production dependencies, creates `.env` from
-`.env.example`, prompts for your bot token and OAuth credentials, registers the slash
-commands, writes `/etc/systemd/system/rocketeerbot.service`, starts it, and installs
-the `rocketeer` command. Re-running it is safe - it keeps your `.env` and `data/`.
+`.env.example`, generates a `SESSION_SECRET`, prompts for your bot token and OAuth
+credentials, registers the slash commands, writes
+`/etc/systemd/system/rocketeerbot.service`, starts it, and installs the `rocketeer`
+command. Re-running it is safe - it keeps your `.env` and `data/`.
+
+Piped through `curl ... | bash` there is no terminal to prompt on, so the Discord
+values stay as placeholders and the service is only enabled, not started. Fill in
+`/opt/rocketeer/.env`, then run `rocketeer start`. To get the prompts instead, download
+the script first (see below).
 
 | Flag | What it does |
 | --- | --- |
 | `--dir <path>` | Install somewhere other than `/opt/rocketeer` |
-| `--ref <ref>` | Install a specific tag or branch, e.g. `--ref v1.1.0-beta.1` |
+| `--ref <ref>` | Install a specific tag or branch, e.g. `--ref v1.1.0` |
 | `--local` | Install from the current checkout instead of downloading |
 | `--service-name <name>` | Name the systemd unit something else |
 | `--user <name>` | User that runs the bot (default: the invoking user) |
@@ -103,6 +109,14 @@ the `rocketeer` command. Re-running it is safe - it keeps your `.env` and `data/
 | `--no-deploy-commands` | Do not register slash commands |
 | `--non-interactive` | Do not prompt; keep `.env` as copied from `.env.example` |
 | `--install-node` | Install Node.js from NodeSource when it is missing |
+| `--postgres <mode>` | Database: `none` (default, SQLite), `docker`, or `creds` |
+
+In an interactive run the installer asks whether to use PostgreSQL, and if so whether to
+start Postgres with Docker (it writes a `docker-compose.yml`, starts the container and
+waits until it accepts connections) or to use credentials you provide (host, port,
+database, user, password - or `DATABASE_URL`). Either way it verifies the connection
+and creates the schema before finishing. Non-interactive runs default to SQLite unless
+you pass `--postgres docker` or `--postgres creds` (with `PG*`/`DATABASE_URL` set).
 
 `bash install.sh --help` lists everything. Prefer to read the script first?
 
@@ -110,6 +124,69 @@ the `rocketeer` command. Re-running it is safe - it keeps your `.env` and `data/
 curl -fsSO https://raw.githubusercontent.com/mmaxx45/rocketeer-bot/main/install.sh
 bash install.sh
 ```
+
+### Database
+
+SQLite is the default and needs nothing: the bot keeps its database in
+`data/rocketeerbot.db`.
+
+PostgreSQL is supported as an alternative. Point the bot at a server with either a
+connection URL or the individual `PG*` values:
+
+```env
+DATABASE_CLIENT=postgres
+DATABASE_URL=postgres://rocketeerbot:password@127.0.0.1:5432/rocketeerbot
+# or
+# PGHOST=127.0.0.1
+# PGPORT=5432
+# PGDATABASE=rocketeerbot
+# PGUSER=rocketeerbot
+# PGPASSWORD=password
+# DATABASE_SSL=false            # true = TLS with certificate check, no-verify = TLS without it
+# DATABASE_POOL_SIZE=10
+```
+
+The schema is created automatically the first time the bot starts against an empty
+database, and the installer verifies the connection for you. To run Postgres
+locally, the installer's Docker option produces:
+
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rocketeerbot
+      POSTGRES_USER: rocketeerbot
+      POSTGRES_PASSWORD: "<generated>"
+    ports:
+      - "127.0.0.1:5432:5432"   # PGPORT=<port> picks another host port
+    volumes:
+      - rocketeerbot-pgdata:/var/lib/postgresql/data
+
+volumes:
+  rocketeerbot-pgdata:
+```
+
+Re-running the installer keeps the password already in `docker-compose.yml` (the
+Postgres image only reads it when the volume is first created).
+
+**Moving an existing SQLite install to Postgres.** Stop the bot, point `.env` at the
+Postgres server (`DATABASE_URL` or `PG*`), then copy the data:
+
+```bash
+rocketeer stop
+npm run db:sqlite-to-postgres            # reads DATABASE_PATH; or: -- --sqlite /path/to/rocketeerbot.db
+# set DATABASE_CLIENT=postgres in .env
+rocketeer start
+```
+
+The copy brings the SQLite file up to the current schema, creates the Postgres schema
+if needed, and copies every table in one transaction, keeping row ids. It refuses to
+write into tables that already have rows unless you pass `-- --force`, which empties
+them first. Rows that point at a parent row that no longer exists (possible in old
+SQLite files) are skipped with a warning. The SQLite file is left untouched, so going
+back is a matter of setting `DATABASE_CLIENT=sqlite` again.
 
 ### The rocketeer CLI
 
@@ -134,10 +211,15 @@ release notes. Your `.env` and `data/` (the SQLite database) are preserved, the 
 three backups are kept, and if anything fails it restores the previous version and
 starts it again.
 
+The backup is made next to the installation, so the update needs write access to its
+parent directory. With the default `/opt/rocketeer` that means `sudo rocketeer update`;
+the CLI checks this before it stops anything and hands the new files back to the
+user that owned the old installation.
+
 ```bash
 rocketeer update --dry-run             # show the plan, change nothing
 rocketeer update --prerelease          # follow the beta channel
-rocketeer update --ref v1.1.0-beta.1   # pin a tag or branch
+rocketeer update --ref v1.1.0   # pin a tag or branch
 rocketeer update --no-restart          # replace files without touching the service
 rocketeer update --no-backup           # discard the backup afterwards
 ```
@@ -149,16 +231,14 @@ written by the installer (`/etc/rocketeer/config.json`, or
 
 ### Beta releases
 
-`v1.1.0-beta` is the current prerelease, published as a GitHub pre-release. Install
-it directly with `install.sh --ref v1.1.0-beta`, or follow the beta channel on an
-existing install:
+Betas are published as GitHub pre-releases. `rocketeer update` follows stable releases
+only; to follow the beta channel on an existing install, use:
 
 ```bash
 rocketeer update --prerelease
 ```
 
-Without `--prerelease`, `rocketeer update` follows stable releases only, and while no
-stable release exists it tells you to use `--prerelease` instead.
+or install a specific one with `install.sh --ref <tag>`.
 
 ### Manual installation
 
@@ -187,16 +267,26 @@ DISCORD_TOKEN=your_bot_token
 DISCORD_CLIENT_ID=your_client_id
 DISCORD_CLIENT_SECRET=your_client_secret
 DISCORD_CALLBACK_URL=http://localhost:3000/auth/discord/callback
-SESSION_SECRET=a_random_secret_string
+SESSION_SECRET=                  # at least 16 random characters: openssl rand -hex 32
 
 # Optional
 PORT=3000
+DASHBOARD_URL=http://localhost:3000   # public URL; https here means "behind a TLS proxy"
+TRUST_PROXY=                     # empty = automatic (trusted when DASHBOARD_URL is https), or true/false
+DATABASE_CLIENT=sqlite           # sqlite or postgres (see Database)
 DATABASE_PATH=./data/rocketeerbot.db
 NODE_ENV=production
-DEV_GUILD_ID=                    # Set for dev: registers commands to one guild instantly
-TRUST_PROXY=false                # Set to true if behind nginx/Cloudflare
 LOG_LEVEL=info                   # debug, info, warn, error
+DEV_GUILD_ID=                    # only used by `node deploy-commands.js --clear-all`
 ```
+
+The bot refuses to start with the example `SESSION_SECRET` from `.env.example`, a secret
+shorter than 16 characters, or an unknown `DATABASE_CLIENT` / `DATABASE_SSL` value, so a
+typo can never silently run it on the wrong database or with a guessable session key.
+
+Dashboard logins are stored in the database (`web_sessions`), so they survive restarts
+and updates. The session cookie is marked secure when `DASHBOARD_URL` starts with
+`https://`; serve the dashboard over plain `http://` only on a trusted network.
 
 #### 3. Enable privileged intents
 
@@ -328,7 +418,12 @@ pm2 monit                     # Real-time monitoring dashboard
 
 ### Running behind a reverse proxy (nginx)
 
-If you put the dashboard behind nginx, set `TRUST_PROXY=true` in `.env` and update `DISCORD_CALLBACK_URL` to your public domain.
+The bot serves plain HTTP; put a TLS-terminating proxy in front of it for a public
+dashboard. Set `DASHBOARD_URL=https://bot.yourdomain.com` and
+`DISCORD_CALLBACK_URL=https://bot.yourdomain.com/auth/discord/callback` (and add that
+redirect in the Discord developer portal). With an https `DASHBOARD_URL` the proxy is
+trusted automatically; `TRUST_PROXY=false` turns that off (dashboard login then fails,
+because the secure cookie is refused), `TRUST_PROXY=true` forces it on for an http URL.
 
 Example nginx config:
 

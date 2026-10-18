@@ -168,7 +168,7 @@ module.exports = {
         const embed = buildPanelEmbed(title, description, [], interaction.guild);
 
         const message = await channel.send({ embeds: [embed], components: [] });
-        const panel = createPanel(interaction.guild.id, channel.id, message.id, title, description);
+        const panel = await createPanel(interaction.guild.id, channel.id, message.id, title, description);
 
         await interaction.editReply({ content: `Self-roles panel created in <#${channel.id}> (Panel ID: **${panel.id}**). Use \`/selfroles add\` to add roles.` });
         logger.info(`Self-roles panel ${panel.id} created in #${channel.name} by ${interaction.user.username}`);
@@ -187,12 +187,12 @@ module.exports = {
 
       let panel;
       if (panelId) {
-        panel = getPanel(panelId);
+        panel = await getPanel(panelId);
         if (!panel || panel.guild_id !== interaction.guild.id) {
           return interaction.reply({ content: 'Panel not found.', flags: MessageFlags.Ephemeral });
         }
       } else {
-        const panels = getPanels(interaction.guild.id);
+        const panels = await getPanels(interaction.guild.id);
         if (panels.length === 0) {
           return interaction.reply({ content: 'No self-roles panels exist. Create one first with `/selfroles setup`.', flags: MessageFlags.Ephemeral });
         }
@@ -200,7 +200,7 @@ module.exports = {
       }
 
       // Check if role is already on the panel
-      const existing = getRoleOptions(panel.id);
+      const existing = await getRoleOptions(panel.id);
       if (existing.find(o => o.role_id === role.id)) {
         return interaction.reply({ content: `**${role.name}** is already on this panel.`, flags: MessageFlags.Ephemeral });
       }
@@ -213,7 +213,7 @@ module.exports = {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
-        const options = addRoleOption(panel.id, role.id, label, emoji, null);
+        const options = await addRoleOption(panel.id, role.id, label, emoji, null);
 
         // Update the panel message
         const channel = await interaction.guild.channels.fetch(panel.channel_id);
@@ -239,19 +239,19 @@ module.exports = {
 
       let panel;
       if (panelId) {
-        panel = getPanel(panelId);
+        panel = await getPanel(panelId);
         if (!panel || panel.guild_id !== interaction.guild.id) {
           return interaction.reply({ content: 'Panel not found.', flags: MessageFlags.Ephemeral });
         }
       } else {
-        const panels = getPanels(interaction.guild.id);
+        const panels = await getPanels(interaction.guild.id);
         if (panels.length === 0) {
           return interaction.reply({ content: 'No self-roles panels exist.', flags: MessageFlags.Ephemeral });
         }
         panel = panels[0];
       }
 
-      const existing = getRoleOptions(panel.id);
+      const existing = await getRoleOptions(panel.id);
       if (!existing.find(o => o.role_id === role.id)) {
         return interaction.reply({ content: `**${role.name}** is not on this panel.`, flags: MessageFlags.Ephemeral });
       }
@@ -259,8 +259,8 @@ module.exports = {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
-        removeRoleOption(panel.id, role.id);
-        const options = getRoleOptions(panel.id);
+        await removeRoleOption(panel.id, role.id);
+        const options = await getRoleOptions(panel.id);
 
         // Update the panel message
         const channel = await interaction.guild.channels.fetch(panel.channel_id);
@@ -285,12 +285,12 @@ module.exports = {
 
       let panel;
       if (panelId) {
-        panel = getPanel(panelId);
+        panel = await getPanel(panelId);
         if (!panel || panel.guild_id !== interaction.guild.id) {
           return interaction.reply({ content: 'Panel not found.', flags: MessageFlags.Ephemeral });
         }
       } else {
-        const panels = getPanels(interaction.guild.id);
+        const panels = await getPanels(interaction.guild.id);
         if (panels.length === 0) {
           return interaction.reply({ content: 'No self-roles panels exist.', flags: MessageFlags.Ephemeral });
         }
@@ -300,7 +300,7 @@ module.exports = {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
-        const options = getRoleOptions(panel.id);
+        const options = await getRoleOptions(panel.id);
         const channel = await interaction.guild.channels.fetch(panel.channel_id);
         const message = await channel.messages.fetch(panel.message_id);
 
@@ -323,12 +323,12 @@ module.exports = {
 
       let panel;
       if (panelId) {
-        panel = getPanel(panelId);
+        panel = await getPanel(panelId);
         if (!panel || panel.guild_id !== interaction.guild.id) {
           return interaction.reply({ content: 'Panel not found.', flags: MessageFlags.Ephemeral });
         }
       } else {
-        const panels = getPanels(interaction.guild.id);
+        const panels = await getPanels(interaction.guild.id);
         if (panels.length === 0) {
           return interaction.reply({ content: 'No self-roles panels exist.', flags: MessageFlags.Ephemeral });
         }
@@ -347,7 +347,7 @@ module.exports = {
           // Message may have already been deleted
         }
 
-        deletePanel(panel.id);
+        await deletePanel(panel.id);
 
         await interaction.editReply({ content: `Self-roles panel (ID: ${panel.id}) has been deleted.` });
         logger.info(`Self-roles panel ${panel.id} deleted by ${interaction.user.username}`);

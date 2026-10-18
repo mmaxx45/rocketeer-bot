@@ -14,7 +14,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
     if (!isModerator(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
@@ -93,7 +93,7 @@ module.exports = {
     }
 
     // Warning history
-    const warnings = getWarnings(interaction.guild.id, userId);
+    const warnings = await getWarnings(interaction.guild.id, userId);
     embed.addFields({ name: 'Total Warnings', value: `${warnings.length}`, inline: true });
 
     if (warnings.length > 0) {
@@ -109,9 +109,10 @@ module.exports = {
     }
 
     // Mod actions targeting this user
-    const modActions = db.prepare(
-      `SELECT action_type, COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND target_id = ? GROUP BY action_type`
-    ).all(interaction.guild.id, userId);
+    const modActions = await db.all(
+      `SELECT action_type, COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND target_id = ? GROUP BY action_type`,
+      [interaction.guild.id, userId]
+    );
 
     if (modActions.length > 0) {
       const actionSummary = modActions.map(a => `**${a.action_type}:** ${a.count}`).join(' | ');

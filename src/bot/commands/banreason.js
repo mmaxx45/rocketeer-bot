@@ -13,19 +13,21 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!canViewBanReason(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const targetId = interaction.options.getString('user').trim();
 
     if (!/^\d{17,20}$/.test(targetId)) {
-      return interaction.reply({ content: 'Please provide a valid user ID (a numeric Discord snowflake).', flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: 'Please provide a valid user ID (a numeric Discord snowflake).' });
     }
 
-    const banAction = getLastBanAction(interaction.guild.id, targetId);
+    const banAction = await getLastBanAction(interaction.guild.id, targetId);
 
     // Try to resolve the user for display
     let targetUser;
@@ -65,7 +67,7 @@ module.exports = {
     }
 
     // Warning history section
-    const warnings = getWarnings(interaction.guild.id, targetId);
+    const warnings = await getWarnings(interaction.guild.id, targetId);
 
     if (warnings.length > 0) {
       const lines = warnings.map((w, i) => {
@@ -89,6 +91,6 @@ module.exports = {
       embed.addFields({ name: 'Warning History', value: 'No warnings on record.' });
     }
 
-    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    return interaction.editReply({ embeds: [embed] });
   },
 };

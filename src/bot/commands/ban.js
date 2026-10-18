@@ -33,11 +33,13 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!canBan(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const targetUser = interaction.options.getUser('user');
     const reason = interaction.options.getString('reason');
@@ -45,11 +47,11 @@ module.exports = {
     const deleteMessageDays = interaction.options.getInteger('delete_messages_days') || 0;
 
     if (targetUser.bot) {
-      return interaction.reply({ content: 'You cannot ban a bot with this command.', flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: 'You cannot ban a bot with this command.' });
     }
 
     if (targetUser.id === interaction.user.id) {
-      return interaction.reply({ content: 'You cannot ban yourself.', flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: 'You cannot ban yourself.' });
     }
 
     let targetMember;
@@ -60,11 +62,11 @@ module.exports = {
     }
 
     if (targetMember && isExempt(targetMember, settings)) {
-      return interaction.reply({ content: 'You cannot ban a moderator or admin.', flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: 'You cannot ban a moderator or admin.' });
     }
 
     // Build confirmation embed with current warnings
-    const existingWarnings = getWarnings(interaction.guild.id, targetUser.id);
+    const existingWarnings = await getWarnings(interaction.guild.id, targetUser.id);
     const embed = buildWarningsEmbed(existingWarnings, targetUser, interaction.guild);
     const displayName = targetUser.username || `User ${targetUser.id}`;
     embed.setTitle(`Ban confirmation: ${displayName}`);
@@ -102,10 +104,9 @@ module.exports = {
         .setStyle(ButtonStyle.Secondary),
     );
 
-    return interaction.reply({
+    return interaction.editReply({
       embeds: [embed],
       components: [row],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

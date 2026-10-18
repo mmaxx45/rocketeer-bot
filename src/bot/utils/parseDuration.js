@@ -31,7 +31,7 @@ const UNITS = {
  * Returns null if invalid, or if duration exceeds 28 days.
  */
 function parseDuration(input) {
-  if (!input) return null;
+  if (typeof input !== 'string' || !input) return null;
   const str = input.trim().toLowerCase();
 
   // Bare number → treat as minutes

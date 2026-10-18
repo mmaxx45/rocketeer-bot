@@ -1,18 +1,18 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
 const logger = require('../../logger');
-const { getWarnings, getWarningCount, addWarning } = require('../../database/warnings');
+const { getWarnings, addWarningNumbered } = require('../../database/warnings');
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
-const { canWarn, canBan, isExempt, isModerator, canViewModActions } = require('../utils/permissions');
+const { canWarn, canBan, isExempt, isModerator, canViewModActions, isUnsafeSelfRole } = require('../utils/permissions');
 const { storePendingAction, getPendingAction, consumePendingAction } = require('../utils/pendingActions');
 const { buildWarningsEmbed } = require('../utils/embeds');
 const { parseDuration, formatDuration } = require('../utils/parseDuration');
 const { getOpenThreadByChannel, closeThread } = require('../../database/modmail');
 const { getRoleOptions } = require('../../database/selfRoles');
 const { addTempBan } = require('../../database/tempbans');
-const { getAppealById, getAppealByChannel, resolveAppeal } = require('../../database/appeals');
-const { getGiveaway, hasEntry, addEntry, removeEntry, getEntryCount, getClaim, setClaim } = require('../../database/giveaways');
-const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway } = require('../commands/giveaway');
+const { getAppealById, getAppealByChannel, resolveAppeal, reopenAppeal } = require('../../database/appeals');
+const { getGiveaway, hasEntry, addEntryIfActive, removeEntry, getEntryCount, getClaim, getClaims, claimPrize, clearClaimDeadline } = require('../../database/giveaways');
+const { buildGiveawayEmbed, buildEndedEmbed, buildGiveawayButtons, endGiveaway, withGiveawayLock, isGiveawayBusy } = require('../commands/giveaway');
 const { openModmailThread } = require('../utils/modmailThread');
 const { addWhitelistWord } = require('../../database/wordFilter');
 
@@ -67,13 +67,23 @@ async function sendBanDM(client, guild, targetId, reason, duration, settings) {
   }
 }
 
+// Per user+giveaway queue for Enter clicks (see giveaway_enter).
+const entryClicks = new Map();
+
+// Ephemeral message that works before and after the interaction was
+// acknowledged (reply can only be used once, and not after defer/update).
+function ephemeral(interaction, content) {
+  const payload = { content, flags: MessageFlags.Ephemeral };
+  return interaction.deferred || interaction.replied ? interaction.followUp(payload) : interaction.reply(payload);
+}
+
 
 async function handleButton(interaction) {
   const [action, ...params] = interaction.customId.split(':');
 
   if (action === 'view_warnings') {
     const targetUserId = params[0];
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
     const modViewing = isModerator(interaction.member, settings);
 
     if (interaction.user.id !== targetUserId && !modViewing) {
@@ -87,7 +97,7 @@ async function handleButton(interaction) {
       targetUser = { id: targetUserId, tag: `Unknown (${targetUserId})`, username: `Unknown (${targetUserId})` };
     }
 
-    const warnings = getWarnings(interaction.guild.id, targetUserId);
+    const warnings = await getWarnings(interaction.guild.id, targetUserId);
     const embed = buildWarningsEmbed(warnings, targetUser, interaction.guild, modViewing);
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
@@ -105,25 +115,27 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
+    // Acknowledge before any DB or Discord round trip (3 second limit)
+    await interaction.deferUpdate();
+
     // Re-verify ban permission in case it was revoked since the button was created
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
     if (!canBan(interaction.member, settings)) {
-      return interaction.reply({ content: 'You no longer have permission to ban.', flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, 'You no longer have permission to ban.');
     }
 
     // Re-check target is not now exempt (e.g. promoted to mod)
     try {
       const targetMember = await interaction.guild.members.fetch(pending.targetId);
       if (isExempt(targetMember, settings)) {
-        return interaction.reply({ content: 'This user is now a moderator or admin and cannot be banned.', flags: MessageFlags.Ephemeral });
+        return ephemeral(interaction, 'This user is now a moderator or admin and cannot be banned.');
       }
     } catch {
       // User left the server — still bannable via guild.bans.create below
     }
 
     try {
-      // Defer immediately to avoid 3-second timeout
-      await interaction.update({
+      await interaction.editReply({
         content: `Banning <@${pending.targetId}>...`,
         embeds: [],
         components: [],
@@ -141,7 +153,7 @@ async function handleButton(interaction) {
       }
 
       try {
-        addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, `Banned due to accumulated warnings: ${pending.reason}`);
+        await addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, `Banned due to accumulated warnings: ${pending.reason}`);
       } catch (err) {
         logger.warn(`Failed to log mod action: ${err.message}`);
       }
@@ -154,7 +166,7 @@ async function handleButton(interaction) {
         try {
           const logChannel = await interaction.guild.channels.fetch(settings.ban_log_channel_id);
           if (logChannel) {
-            const warnings = getWarnings(interaction.guild.id, pending.targetId);
+            const warnings = await getWarnings(interaction.guild.id, pending.targetId);
             const logEmbed = new EmbedBuilder()
               .setTitle('User Banned')
               .setColor(0xFF0000)
@@ -173,7 +185,7 @@ async function handleButton(interaction) {
       }
     } catch (err) {
       logger.error(`Failed to ban user ${pending.targetId}:`, err);
-      await interaction.reply({ content: `Failed to ban user: ${err.message}`, flags: MessageFlags.Ephemeral });
+      await ephemeral(interaction, `Failed to ban user: ${err.message}`).catch(() => {});
     }
     return;
   }
@@ -190,11 +202,13 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
-    addWarning(interaction.guild.id, pending.targetId, pending.moderatorId, pending.reason, 'manual', pending.messageContent || null);
-    const newCount = getWarningCount(interaction.guild.id, pending.targetId);
+    // Acknowledge before the DB writes and the timeout call (3 second limit)
+    await interaction.deferUpdate();
+
+    const newCount = await addWarningNumbered(interaction.guild.id, pending.targetId, pending.moderatorId, pending.reason, 'manual', pending.messageContent || null);
 
     try {
-      addModAction(interaction.guild.id, pending.moderatorId, 'warn', pending.targetId, pending.reason);
+      await addModAction(interaction.guild.id, pending.moderatorId, 'warn', pending.targetId, pending.reason);
     } catch (err) {
       logger.warn(`Failed to log mod action: ${err.message}`);
     }
@@ -208,7 +222,7 @@ async function handleButton(interaction) {
         await member.timeout(pending.timeoutMs, `Warning by ${interaction.user.username}: ${pending.reason}`);
         timeoutApplied = true;
         try {
-          addModAction(interaction.guild.id, pending.moderatorId, 'timeout', pending.targetId, `${pending.timeoutLabel} — ${pending.reason}`);
+          await addModAction(interaction.guild.id, pending.moderatorId, 'timeout', pending.targetId, `${pending.timeoutLabel} — ${pending.reason}`);
         } catch (err) {
           logger.warn(`Failed to log timeout mod action: ${err.message}`);
         }
@@ -225,7 +239,7 @@ async function handleButton(interaction) {
       updateContent += `\n**Timeout failed:** ${timeoutError}`;
     }
 
-    await interaction.update({
+    await interaction.editReply({
       content: updateContent,
       embeds: [],
       components: [],
@@ -238,7 +252,7 @@ async function handleButton(interaction) {
         .setStyle(ButtonStyle.Secondary)
     );
 
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
     const publicMsg = settings.warn_public_message
       ? settings.warn_public_message.replace(/\{user\}/g, `<@${pending.targetId}>`)
       : `<@${pending.targetId}>, you have received an official warning.`;
@@ -312,16 +326,18 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'This action is not for you.', flags: MessageFlags.Ephemeral });
     }
 
+    // Acknowledge before any DB or Discord round trip (3 second limit)
+    await interaction.deferUpdate();
+
     // Re-verify ban permission in case it was revoked
-    const banSettings = getSettings(interaction.guild.id);
+    const banSettings = await getSettings(interaction.guild.id);
     if (!canBan(interaction.member, banSettings)) {
-      return interaction.reply({ content: 'You no longer have permission to ban.', flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, 'You no longer have permission to ban.');
     }
 
     try {
-      // Defer immediately to avoid 3-second timeout
       const durationText = pending.duration ? `${pending.duration} day(s)` : 'Permanent';
-      await interaction.update({
+      await interaction.editReply({
         content: `Banning <@${pending.targetId}>...`,
         embeds: [],
         components: [],
@@ -346,7 +362,7 @@ async function handleButton(interaction) {
       }
 
       try {
-        addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, pending.reason);
+        await addModAction(interaction.guild.id, interaction.user.id, 'ban', pending.targetId, pending.reason);
       } catch (err) {
         logger.warn(`Failed to log mod action: ${err.message}`);
       }
@@ -354,7 +370,7 @@ async function handleButton(interaction) {
       // Record temp ban if duration was specified
       if (pending.duration) {
         try {
-          addTempBan(interaction.guild.id, pending.targetId, interaction.user.id, pending.reason, pending.duration);
+          await addTempBan(interaction.guild.id, pending.targetId, interaction.user.id, pending.reason, pending.duration);
         } catch (err) {
           logger.warn(`Failed to record temp ban: ${err.message}`);
         }
@@ -374,12 +390,12 @@ async function handleButton(interaction) {
       }
 
       // Log to ban log channel
-      const settings = getSettings(interaction.guild.id);
+      const settings = await getSettings(interaction.guild.id);
       if (settings.ban_log_channel_id) {
         try {
           const logChannel = await interaction.guild.channels.fetch(settings.ban_log_channel_id);
           if (logChannel) {
-            const warnings = getWarnings(interaction.guild.id, pending.targetId);
+            const warnings = await getWarnings(interaction.guild.id, pending.targetId);
             const logFields = [
               { name: 'User', value: `<@${pending.targetId}> (${pending.targetId})`, inline: true },
               { name: 'Banned by', value: `<@${interaction.user.id}>`, inline: true },
@@ -405,7 +421,7 @@ async function handleButton(interaction) {
       }
     } catch (err) {
       logger.error(`Failed to ban user ${pending.targetId}:`, err);
-      await interaction.reply({ content: `Failed to ban user: ${err.message}`, flags: MessageFlags.Ephemeral });
+      await ephemeral(interaction, `Failed to ban user: ${err.message}`).catch(() => {});
     }
     return;
   }
@@ -456,16 +472,18 @@ async function handleButton(interaction) {
 
   if (action === 'modmail_close') {
     const channelId = params[0];
-    const thread = getOpenThreadByChannel(channelId);
+    // Acknowledge before the DB lookups and the DM (3 second limit)
+    await interaction.deferUpdate();
+    const thread = await getOpenThreadByChannel(channelId);
 
     if (!thread) {
-      return interaction.reply({ content: 'This modmail thread is already closed or does not exist.', flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, 'This modmail thread is already closed or does not exist.');
     }
 
     // Check if user is a moderator
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
     if (!isModerator(interaction.member, settings)) {
-      return interaction.reply({ content: 'Only moderators can close modmail threads.', flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, 'Only moderators can close modmail threads.');
     }
 
     try {
@@ -486,10 +504,10 @@ async function handleButton(interaction) {
       }
 
       // Close in database
-      closeThread(thread.id, interaction.user.id);
+      await closeThread(thread.id, interaction.user.id);
 
       // Update the message
-      await interaction.update({
+      await interaction.editReply({
         content: `Thread closed by <@${interaction.user.id}>.`,
         components: [],
       });
@@ -519,7 +537,7 @@ async function handleButton(interaction) {
       logger.info(`Modmail thread closed: channel=${channelId} closedBy=${interaction.user.username}`);
     } catch (err) {
       logger.error(`Failed to close modmail thread: ${err.message}`);
-      await interaction.reply({ content: `Failed to close thread: ${err.message}`, flags: MessageFlags.Ephemeral });
+      await ephemeral(interaction, `Failed to close thread: ${err.message}`).catch(() => {});
     }
     return;
   }
@@ -533,7 +551,7 @@ async function handleButton(interaction) {
     }
 
     // Validate roleId is actually registered in this panel (prevent privilege escalation)
-    const panelOptions = getRoleOptions(panelId);
+    const panelOptions = await getRoleOptions(panelId);
     if (!panelOptions.some(opt => opt.role_id === roleId)) {
       return interaction.reply({ content: 'This role is not part of this panel.', flags: MessageFlags.Ephemeral });
     }
@@ -556,6 +574,11 @@ async function handleButton(interaction) {
         return interaction.reply({ content: 'I can\'t assign this role because it\'s above my highest role.', flags: MessageFlags.Ephemeral });
       }
 
+      // Panels made before 1.1.0 could hold roles the dashboard now refuses.
+      if (isUnsafeSelfRole(role)) {
+        return interaction.reply({ content: 'This role has moderation or admin permissions and cannot be self-assigned. An admin should remove it from the panel.', flags: MessageFlags.Ephemeral });
+      }
+
       if (member.roles.cache.has(roleId)) {
         await member.roles.remove(roleId);
         return interaction.reply({ content: `Removed **${role.name}**`, flags: MessageFlags.Ephemeral });
@@ -574,7 +597,7 @@ async function handleButton(interaction) {
     const targetUserId = params[0];
     let page = parseInt(params[1], 10);
     if (isNaN(page) || page < 1) page = 1;
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!canViewModActions(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to view mod actions.', flags: MessageFlags.Ephemeral });
@@ -584,7 +607,7 @@ async function handleButton(interaction) {
     const PAGE_SIZE = 10;
     const offset = (page - 1) * PAGE_SIZE;
 
-    const { rows, total } = getModActions(interaction.guild.id, targetUserId, PAGE_SIZE, offset);
+    const { rows, total } = await getModActions(interaction.guild.id, targetUserId, PAGE_SIZE, offset);
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     if (page > totalPages) page = totalPages;
 
@@ -673,30 +696,40 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'Invalid appeal.', flags: MessageFlags.Ephemeral });
     }
 
-    const appeal = getAppealById(appealId);
+    // Acknowledge before the DB lookups, the unban and the DM (3 second limit)
+    await interaction.deferUpdate();
+
+    const appeal = await getAppealById(appealId);
     if (!appeal) {
-      return interaction.reply({ content: 'This appeal no longer exists.', flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, 'This appeal no longer exists.');
     }
 
     if (appeal.status !== 'pending') {
-      return interaction.reply({ content: `This appeal has already been ${appeal.status}.`, flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, `This appeal has already been ${appeal.status}.`);
     }
 
     // Check moderator permissions
-    const appealSettings = getSettings(appeal.guild_id);
+    const appealSettings = await getSettings(appeal.guild_id);
     if (!isModerator(interaction.member, appealSettings)) {
-      return interaction.reply({ content: 'Only moderators can handle appeals.', flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, 'Only moderators can handle appeals.');
+    }
+
+    // Claim the decision first: only one moderator's click may act on it.
+    if (!(await resolveAppeal(appealId, interaction.user.id, 'accepted'))) {
+      return ephemeral(interaction, 'This appeal has already been handled by another moderator.');
     }
 
     try {
       // Unban the user
-      await interaction.guild.bans.remove(appeal.user_id, `Appeal accepted by ${interaction.user.username}`);
-
-      // Update database
-      resolveAppeal(appealId, interaction.user.id, 'accepted');
+      try {
+        await interaction.guild.bans.remove(appeal.user_id, `Appeal accepted by ${interaction.user.username}`);
+      } catch (err) {
+        await reopenAppeal(appealId).catch(() => {});
+        throw err;
+      }
 
       try {
-        addModAction(appeal.guild_id, interaction.user.id, 'appeal_accept', appeal.user_id, `Ban appeal accepted`);
+        await addModAction(appeal.guild_id, interaction.user.id, 'appeal_accept', appeal.user_id, `Ban appeal accepted`);
       } catch (err) {
         logger.warn(`Failed to log appeal accept mod action: ${err.message}`);
       }
@@ -743,7 +776,7 @@ async function handleButton(interaction) {
         }
       }
 
-      await interaction.update({
+      await interaction.editReply({
         embeds: [
           new EmbedBuilder()
             .setTitle('Appeal Accepted')
@@ -766,7 +799,7 @@ async function handleButton(interaction) {
       logger.info(`Appeal accepted: appealId=${appealId} user=${appeal.user_id} moderator=${interaction.user.username}`);
     } catch (err) {
       logger.error(`Failed to accept appeal: ${err.message}`);
-      await interaction.reply({ content: `Failed to accept appeal: ${err.message}`, flags: MessageFlags.Ephemeral });
+      await ephemeral(interaction, `Failed to accept appeal: ${err.message}`).catch(() => {});
     }
     return;
   }
@@ -777,27 +810,33 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'Invalid appeal.', flags: MessageFlags.Ephemeral });
     }
 
-    const appeal = getAppealById(appealId);
+    // Acknowledge before the DB lookups, the unban and the DM (3 second limit)
+    await interaction.deferUpdate();
+
+    const appeal = await getAppealById(appealId);
     if (!appeal) {
-      return interaction.reply({ content: 'This appeal no longer exists.', flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, 'This appeal no longer exists.');
     }
 
     if (appeal.status !== 'pending') {
-      return interaction.reply({ content: `This appeal has already been ${appeal.status}.`, flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, `This appeal has already been ${appeal.status}.`);
     }
 
     // Check moderator permissions
-    const appealSettings = getSettings(appeal.guild_id);
+    const appealSettings = await getSettings(appeal.guild_id);
     if (!isModerator(interaction.member, appealSettings)) {
-      return interaction.reply({ content: 'Only moderators can handle appeals.', flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, 'Only moderators can handle appeals.');
+    }
+
+    // Claim the decision first: only one moderator's click may act on it.
+    if (!(await resolveAppeal(appealId, interaction.user.id, 'rejected'))) {
+      return ephemeral(interaction, 'This appeal has already been handled by another moderator.');
     }
 
     try {
-      // Update database
-      resolveAppeal(appealId, interaction.user.id, 'rejected');
 
       try {
-        addModAction(appeal.guild_id, interaction.user.id, 'appeal_reject', appeal.user_id, `Ban appeal rejected`);
+        await addModAction(appeal.guild_id, interaction.user.id, 'appeal_reject', appeal.user_id, `Ban appeal rejected`);
       } catch (err) {
         logger.warn(`Failed to log appeal reject mod action: ${err.message}`);
       }
@@ -836,7 +875,7 @@ async function handleButton(interaction) {
         }
       }
 
-      await interaction.update({
+      await interaction.editReply({
         embeds: [
           new EmbedBuilder()
             .setTitle('Appeal Rejected')
@@ -859,7 +898,7 @@ async function handleButton(interaction) {
       logger.info(`Appeal rejected: appealId=${appealId} user=${appeal.user_id} moderator=${interaction.user.username}`);
     } catch (err) {
       logger.error(`Failed to reject appeal: ${err.message}`);
-      await interaction.reply({ content: `Failed to reject appeal: ${err.message}`, flags: MessageFlags.Ephemeral });
+      await ephemeral(interaction, `Failed to reject appeal: ${err.message}`).catch(() => {});
     }
     return;
   }
@@ -870,7 +909,7 @@ async function handleButton(interaction) {
     const whitelistGuildId = params[0];
     const filterWord = decodeURIComponent(params.slice(1).join(':'));
 
-    const whitelistSettings = getSettings(whitelistGuildId);
+    const whitelistSettings = await getSettings(whitelistGuildId);
     if (!isModerator(interaction.member, whitelistSettings)) {
       return interaction.reply({ content: 'Only moderators can whitelist words.', flags: MessageFlags.Ephemeral });
     }
@@ -906,7 +945,7 @@ async function handleButton(interaction) {
 
     try {
       for (const word of matchingWords) {
-        addWhitelistWord(whitelistGuildId, word, interaction.user.id);
+        await addWhitelistWord(whitelistGuildId, word, interaction.user.id);
       }
 
       const whitelisted = matchingWords.map(w => `"${w}"`).join(', ');
@@ -939,33 +978,57 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'Invalid giveaway.', flags: MessageFlags.Ephemeral });
     }
 
-    const giveaway = getGiveaway(giveawayId);
-    if (!giveaway || giveaway.ended) {
-      return interaction.reply({ content: 'This giveaway has ended.', flags: MessageFlags.Ephemeral });
-    }
-
-    const alreadyEntered = hasEntry(giveawayId, interaction.user.id);
-    let message;
-
-    if (alreadyEntered) {
-      removeEntry(giveawayId, interaction.user.id);
-      message = `You left the giveaway for **${giveaway.prize}**.`;
-    } else {
-      addEntry(giveawayId, interaction.user.id);
-      message = `🎉 You entered the giveaway for **${giveaway.prize}**! Good luck!`;
-    }
-
-    const count = getEntryCount(giveawayId);
+    // Acknowledge first (3 second limit); the reply goes out as a follow-up.
     await interaction.deferUpdate();
+
+    // Serialise this user's clicks on this giveaway so a double click toggles
+    // cleanly instead of both clicks seeing "not entered yet".
+    const entryKey = `${giveawayId}:${interaction.user.id}`;
+    const previous = entryClicks.get(entryKey) || Promise.resolve();
+    let release;
+    const current = new Promise(resolve => { release = resolve; });
+    const tail = previous.then(() => current);
+    entryClicks.set(entryKey, tail);
+    await previous;
     try {
-      await interaction.message.edit({
-        embeds: [buildGiveawayEmbed(giveaway, count)],
-        components: buildGiveawayButtons(giveawayId),
-      });
-    } catch (err) {
-      logger.warn(`Failed to update giveaway embed: ${err.message}`);
+      const giveaway = await getGiveaway(giveawayId);
+      if (!giveaway || giveaway.ended || isGiveawayBusy(giveawayId)) {
+        return ephemeral(interaction, 'This giveaway has ended.');
+      }
+
+      let message;
+      if (await hasEntry(giveawayId, interaction.user.id)) {
+        await removeEntry(giveawayId, interaction.user.id);
+        message = `You left the giveaway for **${giveaway.prize}**.`;
+      } else {
+        // Only inserts while the giveaway is still running.
+        const added = await addEntryIfActive(giveawayId, interaction.user.id);
+        if (added.changes === 0 && !(await hasEntry(giveawayId, interaction.user.id))) {
+          return ephemeral(interaction, 'This giveaway has ended.');
+        }
+        message = `🎉 You entered the giveaway for **${giveaway.prize}**! Good luck!`;
+      }
+
+      const count = await getEntryCount(giveawayId);
+      // Re-check right before editing: if the giveaway ended (or started
+      // ending) meanwhile, its message now shows the result and must not be
+      // overwritten with the active embed.
+      const latest = await getGiveaway(giveawayId);
+      if (latest && !latest.ended && !isGiveawayBusy(giveawayId)) {
+        try {
+          await interaction.message.edit({
+            embeds: [buildGiveawayEmbed(latest, count)],
+            components: buildGiveawayButtons(giveawayId),
+          });
+        } catch (err) {
+          logger.warn(`Failed to update giveaway embed: ${err.message}`);
+        }
+      }
+      return ephemeral(interaction, message).catch(() => {});
+    } finally {
+      release();
+      if (entryClicks.get(entryKey) === tail) entryClicks.delete(entryKey);
     }
-    return interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 
   if (action === 'giveaway_claim') {
@@ -974,47 +1037,83 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'Invalid giveaway.', flags: MessageFlags.Ephemeral });
     }
 
-    const giveaway = getGiveaway(giveawayId);
-    if (!giveaway) {
-      return interaction.reply({ content: 'This giveaway no longer exists.', flags: MessageFlags.Ephemeral });
-    }
-    if (!giveaway.ended) {
-      return interaction.reply({ content: 'This giveaway has not ended yet.', flags: MessageFlags.Ephemeral });
-    }
-    if (!giveaway.claim_time) {
-      return interaction.reply({ content: 'This giveaway does not require claiming.', flags: MessageFlags.Ephemeral });
-    }
-
-    const winners = JSON.parse(giveaway.winners || '[]');
-    if (!winners.includes(interaction.user.id)) {
-      return interaction.reply({ content: 'Only the winners can claim this prize.', flags: MessageFlags.Ephemeral });
-    }
-
-    const existing = getClaim(giveawayId, interaction.user.id);
-    if (existing && existing.status === 'claimed') {
-      return interaction.reply({ content: 'You already claimed this prize.', flags: MessageFlags.Ephemeral });
-    }
-    if (!giveaway.claim_deadline || new Date(giveaway.claim_deadline + 'Z').getTime() <= Date.now()) {
-      return interaction.reply({ content: 'The claim window for this giveaway has expired.', flags: MessageFlags.Ephemeral });
-    }
-
-    setClaim(giveawayId, interaction.user.id, 'claimed');
-    logger.info(`Giveaway ${giveawayId} claimed by ${interaction.user.username} in guild ${giveaway.guild_id}`);
-
-    const guild = interaction.guild || interaction.client.guilds.cache.get(giveaway.guild_id);
-    if (!guild) {
-      return interaction.reply({ content: 'The server for this giveaway is not available right now.', flags: MessageFlags.Ephemeral });
-    }
-
+    // Acknowledge first (3 second limit). The button lives in the winner's DMs.
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+    const initial = await getGiveaway(giveawayId);
+    if (!initial) {
+      return interaction.editReply('This giveaway no longer exists.');
+    }
+    // Check the guild before recording the claim, so a "try again" really can
+    // be tried again instead of answering "you already claimed".
+    const guild = interaction.guild || interaction.client.guilds.cache.get(initial.guild_id);
+    if (!guild) {
+      return interaction.editReply('The server for this giveaway is not available right now — please try again later.');
+    }
+
+    // The state change runs under the giveaway lock (queued, never dropped) so
+    // it cannot interleave with the claim window expiring or a reroll, and it
+    // re-reads the giveaway inside the lock.
+    const outcome = await withGiveawayLock(giveawayId, async () => {
+      const giveaway = await getGiveaway(giveawayId);
+      if (!giveaway) return { error: 'This giveaway no longer exists.' };
+      if (!giveaway.ended) return { error: 'This giveaway has not ended yet.' };
+      if (!giveaway.claim_time) return { error: 'This giveaway does not require claiming.' };
+
+      const winners = JSON.parse(giveaway.winners || '[]');
+      if (!winners.includes(interaction.user.id)) return { error: 'Only the winners can claim this prize.' };
+
+      const existing = await getClaim(giveawayId, interaction.user.id);
+      if (existing && existing.status === 'claimed') return { error: 'You already claimed this prize.' };
+      if (!giveaway.claim_deadline || new Date(giveaway.claim_deadline + 'Z').getTime() <= Date.now()) {
+        return { error: 'The claim window for this giveaway has expired.' };
+      }
+
+      // Atomic: only one call can make the transition.
+      const claim = await claimPrize(giveawayId, interaction.user.id);
+      if (claim.changes !== 1) return { error: 'You already claimed this prize.' };
+
+      // Once every current winner has claimed, close the window.
+      const claimedIds = new Set((await getClaims(giveawayId)).filter(c => c.status === 'claimed').map(c => c.user_id));
+      const allClaimed = winners.every(id => claimedIds.has(id));
+      if (allClaimed) await clearClaimDeadline(giveawayId);
+      return { giveaway, winners, allClaimed };
+    }, { wait: true });
+
+    const { error, giveaway, winners, allClaimed } = outcome.value;
+    if (error) {
+      return interaction.editReply(error);
+    }
+    logger.info(`Giveaway ${giveawayId} claimed by ${interaction.user.username} in guild ${giveaway.guild_id}`);
+
+    if (allClaimed && giveaway.message_id) {
+      // Show it on the giveaway message right away rather than at the next sweep.
+      try {
+        const channel = await guild.channels.fetch(giveaway.channel_id);
+        const message = channel ? await channel.messages.fetch(giveaway.message_id) : null;
+        if (message) {
+          await message.edit({
+            embeds: [buildEndedEmbed({ ...giveaway, claim_deadline: null }, winners.map(id => `<@${id}>`))],
+            components: buildGiveawayButtons(giveaway.id, true),
+          });
+        }
+      } catch (err) {
+        logger.warn(`Failed to update giveaway ${giveawayId} after the last claim: ${err.message}`);
+      }
+    }
+
+    // 'opened' (thread ready), 'disabled' (modmail not configured) or 'failed'.
+    let modmailState = 'disabled';
     let modmailChannel = null;
     try {
-      const settings = getSettings(giveaway.guild_id);
-      modmailChannel = await openModmailThread(interaction.client, guild, interaction.user, settings, {
+      const settings = await getSettings(giveaway.guild_id);
+      const thread = await openModmailThread(interaction.client, guild, interaction.user, settings, {
         topic: `Prize claim: ${giveaway.prize} (giveaway #${giveaway.id})`,
+        returnDetails: true,
       });
-      if (modmailChannel) {
+      if (thread) {
+        modmailChannel = thread.channel;
+        modmailState = 'opened';
         const claimEmbed = new EmbedBuilder()
           .setTitle('🎁 Prize Claim')
           .setColor(0x2ECC71)
@@ -1025,29 +1124,41 @@ async function handleButton(interaction) {
           )
           .setDescription(`Winner claimed giveaway #${giveaway.id}. Use this thread to arrange the payout.`)
           .setTimestamp();
-        await modmailChannel.send({ content: `<@${giveaway.host_id}>`, embeds: [claimEmbed] });
+        // A new thread gets the same Close button as one opened by a DM.
+        const components = thread.created
+          ? [new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`modmail_close:${modmailChannel.id}`)
+              .setLabel('Close Thread')
+              .setStyle(ButtonStyle.Danger)
+              .setEmoji('🔒'),
+          )]
+          : [];
+        await modmailChannel.send({ content: `<@${giveaway.host_id}>`, embeds: [claimEmbed], components });
       } else {
         logger.warn(`Giveaway ${giveawayId} claimed but modmail is not configured in guild ${giveaway.guild_id}`);
       }
     } catch (err) {
+      modmailState = modmailChannel ? 'opened' : 'failed';
       logger.error(`Failed to open modmail for giveaway claim ${giveawayId}: ${err.message}`);
     }
 
     try {
       const channel = await guild.channels.fetch(giveaway.channel_id);
       if (channel) {
-        await channel.send(
-          modmailChannel
-            ? `🎁 <@${interaction.user.id}> claimed the prize for **${giveaway.prize}**!`
-            : `🎁 <@${interaction.user.id}> claimed **${giveaway.prize}** — modmail is disabled, please contact <@${giveaway.host_id}> for the payout.`
-        );
+        const text = {
+          opened: `🎁 <@${interaction.user.id}> claimed the prize for **${giveaway.prize}**!`,
+          disabled: `🎁 <@${interaction.user.id}> claimed **${giveaway.prize}** — modmail is disabled, please contact <@${giveaway.host_id}> for the payout.`,
+          failed: `🎁 <@${interaction.user.id}> claimed **${giveaway.prize}** — a modmail thread could not be opened, please contact <@${giveaway.host_id}> for the payout.`,
+        }[modmailState];
+        await channel.send(text);
       }
     } catch (err) {
       logger.warn(`Failed to announce giveaway claim: ${err.message}`);
     }
 
     await interaction.editReply({
-      content: modmailChannel
+      content: modmailState === 'opened'
         ? `🎁 You claimed **${giveaway.prize}**! A modmail thread has been opened — reply here to arrange the payout.`
         : `🎁 You claimed **${giveaway.prize}**! The host has been notified in the server.`,
     });
@@ -1065,13 +1176,16 @@ async function handleSelectMenu(interaction) {
 
   if (interaction.customId === 'giveaway_end_select') {
     const giveawayId = parseInt(interaction.values[0], 10);
-    const giveaway = getGiveaway(giveawayId);
+    const giveaway = await getGiveaway(giveawayId);
     if (!giveaway || giveaway.ended) {
       return interaction.update({ content: 'This giveaway has already ended.', components: [] });
     }
 
     await interaction.update({ content: 'Ending giveaway...', components: [] });
     const winners = await endGiveaway(interaction.client, giveaway);
+    if (!winners) {
+      return interaction.editReply('This giveaway could not be ended right now: it already ended, is being ended, or its server is unavailable.');
+    }
     const winnerText = winners.length > 0 ? winners.map(id => `<@${id}>`).join(', ') : 'No entries';
     await interaction.editReply(`Giveaway for **${giveaway.prize}** ended! Winners: ${winnerText}`);
     return;
@@ -1101,40 +1215,44 @@ async function handleCommand(interaction) {
 async function handleModalSubmit(interaction) {
   if (!interaction.customId.startsWith('warn_modal:')) return;
 
+  // Acknowledge first: the checks below need several DB and Discord round
+  // trips, and Discord drops interactions not acknowledged within 3 seconds.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   const [, targetUserId, messageId, channelId] = interaction.customId.split(':');
   const reason = interaction.fields.getTextInputValue('reason') || 'No reason provided';
   const timeoutInput = interaction.fields.getTextInputValue('timeout') || null;
   const timeoutMs = timeoutInput ? parseDuration(timeoutInput) : null;
   const timeoutLabel = timeoutMs ? formatDuration(timeoutMs) : null;
-  const settings = getSettings(interaction.guild.id);
+  const settings = await getSettings(interaction.guild.id);
 
   if (timeoutInput && !timeoutMs) {
-    return interaction.reply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.', flags: MessageFlags.Ephemeral });
+    return interaction.editReply({ content: 'Invalid timeout format. Use e.g. `30s`, `5m`, `1h`, `2d`, `1w`, `1mo`. Max 28 days.' });
   }
 
   if (!canWarn(interaction.member, settings)) {
-    return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+    return interaction.editReply({ content: 'You do not have permission to use this command.' });
   }
 
   let targetUser;
   try {
     targetUser = await interaction.client.users.fetch(targetUserId);
   } catch {
-    return interaction.reply({ content: 'Could not find that user.', flags: MessageFlags.Ephemeral });
+    return interaction.editReply({ content: 'Could not find that user.' });
   }
 
   let targetMember;
   try {
     targetMember = await interaction.guild.members.fetch(targetUserId);
   } catch {
-    return interaction.reply({ content: 'Could not find that user in this server.', flags: MessageFlags.Ephemeral });
+    return interaction.editReply({ content: 'Could not find that user in this server.' });
   }
 
   if (isExempt(targetMember, settings)) {
-    return interaction.reply({ content: 'You cannot warn a moderator or someone with a higher role.', flags: MessageFlags.Ephemeral });
+    return interaction.editReply({ content: 'You cannot warn a moderator or someone with a higher role.' });
   }
 
-  const existingWarnings = getWarnings(interaction.guild.id, targetUserId);
+  const existingWarnings = await getWarnings(interaction.guild.id, targetUserId);
   const warningThreshold = settings.warning_threshold || 3;
 
   // Fetch the target message content for storage
@@ -1192,20 +1310,18 @@ async function handleModalSubmit(interaction) {
     );
     const row = new ActionRowBuilder().addComponents(buttons);
 
-    return interaction.reply({
+    return interaction.editReply({
       content: `**New warning reason:** ${reason}`,
       embeds: [embed],
       components: [row],
-      flags: MessageFlags.Ephemeral,
     });
   }
 
   // Below threshold - issue directly
-  addWarning(interaction.guild.id, targetUserId, interaction.user.id, reason, 'manual', messageContent);
-  const newCount = getWarningCount(interaction.guild.id, targetUserId);
+  const newCount = await addWarningNumbered(interaction.guild.id, targetUserId, interaction.user.id, reason, 'manual', messageContent);
 
   try {
-    addModAction(interaction.guild.id, interaction.user.id, 'warn', targetUserId, reason);
+    await addModAction(interaction.guild.id, interaction.user.id, 'warn', targetUserId, reason);
   } catch (err) {
     logger.warn(`Failed to log mod action: ${err.message}`);
   }
@@ -1219,7 +1335,7 @@ async function handleModalSubmit(interaction) {
       await member.timeout(timeoutMs, `Warning by ${interaction.user.username}: ${reason}`);
       timeoutApplied = true;
       try {
-        addModAction(interaction.guild.id, interaction.user.id, 'timeout', targetUserId, `${timeoutLabel} — ${reason}`);
+        await addModAction(interaction.guild.id, interaction.user.id, 'timeout', targetUserId, `${timeoutLabel} — ${reason}`);
       } catch (err) {
         logger.warn(`Failed to log timeout mod action: ${err.message}`);
       }
@@ -1236,10 +1352,7 @@ async function handleModalSubmit(interaction) {
     replyContent += `\n**Timeout failed:** ${timeoutError}`;
   }
 
-  await interaction.reply({
-    content: replyContent,
-    flags: MessageFlags.Ephemeral,
-  });
+  await interaction.editReply({ content: replyContent });
 
   // Send public notification
   const warnPublicMsg = settings.warn_public_message
@@ -1317,7 +1430,7 @@ async function handleAutocomplete(interaction) {
 
   let reasons = DEFAULT_WARN_REASONS;
   try {
-    const settings = getSettings(guildId);
+    const settings = await getSettings(guildId);
     if (settings.custom_warn_reasons) {
       const parsed = JSON.parse(settings.custom_warn_reasons);
       if (Array.isArray(parsed) && parsed.length > 0) {

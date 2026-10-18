@@ -14,14 +14,14 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!isModerator(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     const targetUser = interaction.options.getUser('user');
-    const warnings = getWarnings(interaction.guild.id, targetUser.id);
+    const warnings = await getWarnings(interaction.guild.id, targetUser.id);
     const embed = buildWarningsEmbed(warnings, targetUser, interaction.guild);
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
