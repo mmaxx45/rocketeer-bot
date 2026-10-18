@@ -12,6 +12,32 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+### Added
+
+- `rocketeer setup` asks for the Discord bot token, client ID, client secret and the
+  dashboard URL and writes them to `.env` (the token and secret are not shown while
+  typing; the OAuth callback URL follows the dashboard URL). `rocketeer start` and
+  `restart` run it automatically when the credentials are still placeholders, so a
+  fresh install only needs `rocketeer start`; without a terminal they refuse instead
+  of starting a bot that cannot log in.
+
+### Changed
+
+- `install.sh` installs Node.js 22 (LTS) when Node.js 20 or newer is missing, using
+  apt, dnf, yum, apk or pacman (root or sudo needed); `--no-install-node` turns this
+  off. It used to stop and ask for `--install-node`, and then only supported apt.
+- The installer's prompts now work through `curl ... | bash`: they read from your
+  terminal instead of the piped script.
+
+### Fixed
+
+- `curl ... | bash` printed `BASH_SOURCE[0]: unbound variable`: the installer
+  assumed it was running from a file.
+- The installer is read completely before it runs, so a cut-off download cannot run
+  half of it, and no command it starts can consume the rest of a piped script.
+- The installer's closing hint no longer suggests `rocketeer start` when no systemd
+  service was set up.
+
 ## [1.1.0] - 2026-10-19
 
 ### Upgrade notes

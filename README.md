@@ -85,17 +85,18 @@ Built with discord.js v14, better-sqlite3, Express, and EJS.
 curl -fsSL https://raw.githubusercontent.com/mmaxx45/rocketeer-bot/main/install.sh | bash
 ```
 
-`install.sh` needs no git checkout: it downloads the latest GitHub release into
-`/opt/rocketeer`, installs the production dependencies, creates `.env` from
+`install.sh` needs no git checkout: it installs Node.js 22 if Node.js 20+ is missing
+(via apt, dnf, yum, apk or pacman - this needs root or sudo), downloads the latest
+GitHub release into `/opt/rocketeer`, installs the production dependencies, creates `.env` from
 `.env.example`, generates a `SESSION_SECRET`, prompts for your bot token and OAuth
 credentials, registers the slash commands, writes
 `/etc/systemd/system/rocketeerbot.service`, starts it, and installs the `rocketeer`
 command. Re-running it is safe - it keeps your `.env` and `data/`.
 
-Piped through `curl ... | bash` there is no terminal to prompt on, so the Discord
-values stay as placeholders and the service is only enabled, not started. Fill in
-`/opt/rocketeer/.env`, then run `rocketeer start`. To get the prompts instead, download
-the script first (see below).
+The prompts work through `curl ... | bash` too (they read from your terminal). If you
+skip them, or install without a terminal, the service is only enabled, not started:
+run `rocketeer start` and it asks for the Discord credentials before starting the bot
+(`rocketeer setup` asks again any time).
 
 | Flag | What it does |
 | --- | --- |
@@ -108,7 +109,7 @@ the script first (see below).
 | `--no-cli` | Skip the global `rocketeer` command |
 | `--no-deploy-commands` | Do not register slash commands |
 | `--non-interactive` | Do not prompt; keep `.env` as copied from `.env.example` |
-| `--install-node` | Install Node.js from NodeSource when it is missing |
+| `--no-install-node` | Fail instead of installing Node.js when it is missing |
 | `--postgres <mode>` | Database: `none` (default, SQLite), `docker`, or `creds` |
 
 In an interactive run the installer asks whether to use PostgreSQL, and if so whether to
