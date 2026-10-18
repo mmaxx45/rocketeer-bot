@@ -11,8 +11,9 @@ const { getOpenThreadByChannel, closeThread } = require('../../database/modmail'
 const { getRoleOptions } = require('../../database/selfRoles');
 const { addTempBan } = require('../../database/tempbans');
 const { getAppealById, getAppealByChannel, resolveAppeal } = require('../../database/appeals');
-const { getGiveaway, hasEntry, addEntry, removeEntry, getEntryCount } = require('../../database/giveaways');
+const { getGiveaway, hasEntry, addEntry, removeEntry, getEntryCount, getClaim, setClaim } = require('../../database/giveaways');
 const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway } = require('../commands/giveaway');
+const { openModmailThread } = require('../utils/modmailThread');
 const { addWhitelistWord } = require('../../database/wordFilter');
 
 const DEFAULT_WARN_REASONS = [
@@ -965,6 +966,92 @@ async function handleButton(interaction) {
       logger.warn(`Failed to update giveaway embed: ${err.message}`);
     }
     return interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
+  }
+
+  if (action === 'giveaway_claim') {
+    const giveawayId = parseInt(params[0], 10);
+    if (isNaN(giveawayId)) {
+      return interaction.reply({ content: 'Invalid giveaway.', flags: MessageFlags.Ephemeral });
+    }
+
+    const giveaway = getGiveaway(giveawayId);
+    if (!giveaway) {
+      return interaction.reply({ content: 'This giveaway no longer exists.', flags: MessageFlags.Ephemeral });
+    }
+    if (!giveaway.ended) {
+      return interaction.reply({ content: 'This giveaway has not ended yet.', flags: MessageFlags.Ephemeral });
+    }
+    if (!giveaway.claim_time) {
+      return interaction.reply({ content: 'This giveaway does not require claiming.', flags: MessageFlags.Ephemeral });
+    }
+
+    const winners = JSON.parse(giveaway.winners || '[]');
+    if (!winners.includes(interaction.user.id)) {
+      return interaction.reply({ content: 'Only the winners can claim this prize.', flags: MessageFlags.Ephemeral });
+    }
+
+    const existing = getClaim(giveawayId, interaction.user.id);
+    if (existing && existing.status === 'claimed') {
+      return interaction.reply({ content: 'You already claimed this prize.', flags: MessageFlags.Ephemeral });
+    }
+    if (!giveaway.claim_deadline || new Date(giveaway.claim_deadline + 'Z').getTime() <= Date.now()) {
+      return interaction.reply({ content: 'The claim window for this giveaway has expired.', flags: MessageFlags.Ephemeral });
+    }
+
+    setClaim(giveawayId, interaction.user.id, 'claimed');
+    logger.info(`Giveaway ${giveawayId} claimed by ${interaction.user.username} in guild ${giveaway.guild_id}`);
+
+    const guild = interaction.guild || interaction.client.guilds.cache.get(giveaway.guild_id);
+    if (!guild) {
+      return interaction.reply({ content: 'The server for this giveaway is not available right now.', flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    let modmailChannel = null;
+    try {
+      const settings = getSettings(giveaway.guild_id);
+      modmailChannel = await openModmailThread(interaction.client, guild, interaction.user, settings, {
+        topic: `Prize claim: ${giveaway.prize} (giveaway #${giveaway.id})`,
+      });
+      if (modmailChannel) {
+        const claimEmbed = new EmbedBuilder()
+          .setTitle('🎁 Prize Claim')
+          .setColor(0x2ECC71)
+          .addFields(
+            { name: 'Winner', value: `<@${interaction.user.id}> (${interaction.user.username})`, inline: true },
+            { name: 'Prize', value: giveaway.prize, inline: true },
+            { name: 'Host', value: `<@${giveaway.host_id}>`, inline: true },
+          )
+          .setDescription(`Winner claimed giveaway #${giveaway.id}. Use this thread to arrange the payout.`)
+          .setTimestamp();
+        await modmailChannel.send({ content: `<@${giveaway.host_id}>`, embeds: [claimEmbed] });
+      } else {
+        logger.warn(`Giveaway ${giveawayId} claimed but modmail is not configured in guild ${giveaway.guild_id}`);
+      }
+    } catch (err) {
+      logger.error(`Failed to open modmail for giveaway claim ${giveawayId}: ${err.message}`);
+    }
+
+    try {
+      const channel = await guild.channels.fetch(giveaway.channel_id);
+      if (channel) {
+        await channel.send(
+          modmailChannel
+            ? `🎁 <@${interaction.user.id}> claimed the prize for **${giveaway.prize}**!`
+            : `🎁 <@${interaction.user.id}> claimed **${giveaway.prize}** — modmail is disabled, please contact <@${giveaway.host_id}> for the payout.`
+        );
+      }
+    } catch (err) {
+      logger.warn(`Failed to announce giveaway claim: ${err.message}`);
+    }
+
+    await interaction.editReply({
+      content: modmailChannel
+        ? `🎁 You claimed **${giveaway.prize}**! A modmail thread has been opened — reply here to arrange the payout.`
+        : `🎁 You claimed **${giveaway.prize}**! The host has been notified in the server.`,
+    });
+    return;
   }
 
   if (action === 'giveaway_end_select') {

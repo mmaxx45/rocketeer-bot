@@ -770,16 +770,22 @@
             </div>
           </div>
           <div class="row">
-            <div class="col-md-4">
+            <div class="col-md-3">
               <div class="setting-item">
                 <label class="setting-label">Title</label>
                 <input type="text" id="giveaway-title" class="form-control" placeholder="🎉 GIVEAWAY 🎉">
               </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-2">
               <div class="setting-item">
                 <label class="setting-label">Duration</label>
                 <input type="text" id="giveaway-duration" class="form-control" placeholder="e.g. 1h, 2d, 30m">
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="setting-item">
+                <label class="setting-label">Claim Time</label>
+                <input type="text" id="giveaway-claimtime" class="form-control" placeholder="optional, e.g. 24h">
               </div>
             </div>
             <div class="col-md-2">
@@ -792,6 +798,17 @@
               <div class="setting-item">
                 <label class="setting-label">Color</label>
                 <input type="color" id="giveaway-color" class="form-control form-control-color" value="#5865F2">
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4">
+              <div class="setting-item">
+                <label class="setting-label">If not claimed</label>
+                <select id="giveaway-claimaction" class="form-select">
+                  <option value="reroll">Reroll to a new winner</option>
+                  <option value="void">Void the win</option>
+                </select>
               </div>
             </div>
           </div>

@@ -5,7 +5,7 @@ let stmts;
 function getStmts() {
   if (!stmts) {
     stmts = {
-      create: db.prepare(`INSERT INTO giveaways (guild_id, channel_id, host_id, title, prize, description, color, winner_count, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      create: db.prepare(`INSERT INTO giveaways (guild_id, channel_id, host_id, title, prize, description, color, winner_count, claim_time, claim_action, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       setMessageId: db.prepare(`UPDATE giveaways SET message_id = ? WHERE id = ?`),
       get: db.prepare(`SELECT * FROM giveaways WHERE id = ?`),
       getByMessage: db.prepare(`SELECT * FROM giveaways WHERE message_id = ?`),
@@ -15,20 +15,27 @@ function getStmts() {
       getAllForGuild: db.prepare(`SELECT * FROM giveaways WHERE guild_id = ? ORDER BY created_at DESC LIMIT 50`),
       getExpired: db.prepare(`SELECT * FROM giveaways WHERE ended = 0 AND ends_at <= datetime('now')`),
       markEnded: db.prepare(`UPDATE giveaways SET ended = 1, winners = ? WHERE id = ?`),
-      update: db.prepare(`UPDATE giveaways SET title = ?, prize = ?, description = ?, color = ?, winner_count = ? WHERE id = ?`),
+      update: db.prepare(`UPDATE giveaways SET title = ?, prize = ?, description = ?, color = ?, winner_count = ?, claim_time = ?, claim_action = ? WHERE id = ?`),
       delete: db.prepare(`DELETE FROM giveaways WHERE id = ?`),
       addEntry: db.prepare(`INSERT OR IGNORE INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)`),
       removeEntry: db.prepare(`DELETE FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?`),
       getEntries: db.prepare(`SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?`),
       getEntryCount: db.prepare(`SELECT COUNT(*) as count FROM giveaway_entries WHERE giveaway_id = ?`),
       hasEntry: db.prepare(`SELECT 1 FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?`),
+      setClaimDeadline: db.prepare(`UPDATE giveaways SET claim_deadline = ? WHERE id = ?`),
+      clearClaimDeadline: db.prepare(`UPDATE giveaways SET claim_deadline = NULL WHERE id = ?`),
+      getClaim: db.prepare(`SELECT * FROM giveaway_claims WHERE giveaway_id = ? AND user_id = ?`),
+      getClaims: db.prepare(`SELECT user_id, status FROM giveaway_claims WHERE giveaway_id = ?`),
+      setClaim: db.prepare(`INSERT INTO giveaway_claims (giveaway_id, user_id, status) VALUES (?, ?, ?) ON CONFLICT(giveaway_id, user_id) DO UPDATE SET status = excluded.status, updated_at = datetime('now')`),
+      clearClaims: db.prepare(`DELETE FROM giveaway_claims WHERE giveaway_id = ?`),
+      getPendingClaims: db.prepare(`SELECT * FROM giveaways WHERE ended = 1 AND claim_time IS NOT NULL AND claim_deadline IS NOT NULL AND claim_deadline <= datetime('now')`),
     };
   }
   return stmts;
 }
 
-function createGiveaway(guildId, channelId, hostId, title, prize, description, color, winnerCount, endsAt) {
-  const result = getStmts().create.run(guildId, channelId, hostId, title, prize, description || null, color || null, winnerCount, endsAt);
+function createGiveaway(guildId, channelId, hostId, title, prize, description, color, winnerCount, claimTime, claimAction, endsAt) {
+  const result = getStmts().create.run(guildId, channelId, hostId, title, prize, description || null, color || null, winnerCount, claimTime || null, claimAction || 'reroll', endsAt);
   return { id: result.lastInsertRowid, ...getGiveaway(result.lastInsertRowid) };
 }
 
@@ -68,8 +75,8 @@ function markEnded(giveawayId, winnersJson) {
   return getStmts().markEnded.run(winnersJson, giveawayId);
 }
 
-function updateGiveaway(giveawayId, title, prize, description, color, winnerCount) {
-  return getStmts().update.run(title, prize, description || null, color || null, winnerCount, giveawayId);
+function updateGiveaway(giveawayId, title, prize, description, color, winnerCount, claimTime, claimAction) {
+  return getStmts().update.run(title, prize, description || null, color || null, winnerCount, claimTime || null, claimAction || 'reroll', giveawayId);
 }
 
 function deleteGiveaway(giveawayId) {
@@ -96,6 +103,34 @@ function hasEntry(giveawayId, userId) {
   return !!getStmts().hasEntry.get(giveawayId, userId);
 }
 
+function setClaimDeadline(giveawayId, deadline) {
+  return getStmts().setClaimDeadline.run(deadline, giveawayId);
+}
+
+function clearClaimDeadline(giveawayId) {
+  return getStmts().clearClaimDeadline.run(giveawayId);
+}
+
+function getClaim(giveawayId, userId) {
+  return getStmts().getClaim.get(giveawayId, userId);
+}
+
+function getClaims(giveawayId) {
+  return getStmts().getClaims.all(giveawayId);
+}
+
+function setClaim(giveawayId, userId, status) {
+  return getStmts().setClaim.run(giveawayId, userId, status);
+}
+
+function clearClaims(giveawayId) {
+  return getStmts().clearClaims.run(giveawayId);
+}
+
+function getPendingClaimGiveaways() {
+  return getStmts().getPendingClaims.all();
+}
+
 module.exports = {
   createGiveaway,
   setMessageId,
@@ -114,4 +149,11 @@ module.exports = {
   getEntries,
   getEntryCount,
   hasEntry,
+  setClaimDeadline,
+  clearClaimDeadline,
+  getClaim,
+  getClaims,
+  setClaim,
+  clearClaims,
+  getPendingClaimGiveaways,
 };

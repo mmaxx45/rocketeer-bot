@@ -419,6 +419,26 @@ function runMigrations() {
     db.pragma('user_version = 25');
   }
 
+  if (version < 26) {
+    logger.info('Running database migration v26: giveaway claim window');
+    safeAddColumn('giveaways', 'claim_time', 'INTEGER DEFAULT NULL');
+    safeAddColumn('giveaways', 'claim_deadline', 'TEXT DEFAULT NULL');
+    safeAddColumn('giveaways', 'claim_action', "TEXT DEFAULT 'reroll'");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS giveaway_claims (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        giveaway_id INTEGER NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('claimed', 'expired')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_giveaway_claims_unique ON giveaway_claims(giveaway_id, user_id);
+      CREATE INDEX IF NOT EXISTS idx_giveaway_claims_status ON giveaway_claims(giveaway_id, status);
+    `);
+    db.pragma('user_version = 26');
+  }
+
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);
 }
 

@@ -644,10 +644,20 @@ async function removeGiveawayHost(guildId, userId, btn) {
   }
 }
 
+function formatClaimTime(seconds) {
+  if (!seconds) return '';
+  if (seconds % 86400 === 0) return (seconds / 86400) + 'd';
+  if (seconds % 3600 === 0) return (seconds / 3600) + 'h';
+  if (seconds % 60 === 0) return (seconds / 60) + 'm';
+  return seconds + 's';
+}
+
 async function createGiveaway(guildId) {
   const channelId = document.getElementById('giveaway-channel').value;
   const prize = document.getElementById('giveaway-prize').value.trim();
   const duration = document.getElementById('giveaway-duration').value.trim();
+  const claimTime = document.getElementById('giveaway-claimtime').value.trim();
+  const claimAction = document.getElementById('giveaway-claimaction').value;
   const title = document.getElementById('giveaway-title').value.trim() || null;
   const description = document.getElementById('giveaway-description').value.trim() || null;
   const winnerCount = parseInt(document.getElementById('giveaway-winners').value) || 1;
@@ -662,13 +672,15 @@ async function createGiveaway(guildId) {
     const res = await fetch(`/api/guild/${guildId}/giveaways`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channelId, prize, duration, title, description, winnerCount, color }),
+      body: JSON.stringify({ channelId, prize, duration, claimTime: claimTime || null, claimAction, title, description, winnerCount, color }),
     });
     const result = await res.json();
     if (result.success) {
       showToast('Giveaway created!');
       document.getElementById('giveaway-prize').value = '';
       document.getElementById('giveaway-duration').value = '';
+      document.getElementById('giveaway-claimtime').value = '';
+      document.getElementById('giveaway-claimaction').value = 'reroll';
       document.getElementById('giveaway-title').value = '';
       document.getElementById('giveaway-description').value = '';
       document.getElementById('giveaway-winners').value = '1';
@@ -710,7 +722,7 @@ async function loadGiveaways(guildId) {
 
       let actions = '';
       if (isActive) {
-        actions += `<button class="btn btn-sm btn-outline-light" onclick="editGiveaway('${guildId}', ${g.id}, this)" data-title="${escapeHtml(g.title || '')}" data-prize="${escapeHtml(g.prize)}" data-description="${escapeHtml(g.description || '')}" data-color="${escapeHtml(g.color || '#5865F2')}" data-winners="${g.winner_count}"><i class="bi bi-pencil"></i> Edit</button> `;
+        actions += `<button class="btn btn-sm btn-outline-light" onclick="editGiveaway('${guildId}', ${g.id}, this)" data-title="${escapeHtml(g.title || '')}" data-prize="${escapeHtml(g.prize)}" data-description="${escapeHtml(g.description || '')}" data-color="${escapeHtml(g.color || '#5865F2')}" data-winners="${g.winner_count}" data-claim="${g.claim_time || ''}" data-claimaction="${g.claim_action || 'reroll'}"><i class="bi bi-pencil"></i> Edit</button> `;
         actions += `<button class="btn btn-sm btn-outline-warning" onclick="endGiveaway('${guildId}', ${g.id})"><i class="bi bi-stop-circle"></i> End</button> `;
       } else {
         actions += `<button class="btn btn-sm btn-outline-info" onclick="rerollGiveaway('${guildId}', ${g.id})"><i class="bi bi-arrow-repeat"></i> Reroll</button> `;
@@ -730,7 +742,7 @@ async function loadGiveaways(guildId) {
                   <i class="bi bi-gift"></i> ${escapeHtml(g.prize)} &middot;
                   <i class="bi bi-people"></i> ${g.entry_count} entries &middot;
                   <i class="bi bi-trophy"></i> ${g.winner_count} winner(s) &middot;
-                  <i class="bi bi-clock"></i> ${timeStr}
+                  <i class="bi bi-clock"></i> ${timeStr}${g.claim_time ? ` &middot; <i class="bi bi-hourglass-split"></i> claim ${formatClaimTime(g.claim_time)}` : ''}
                 </div>
                 ${winnerText ? `<div class="small mt-1"><i class="bi bi-trophy-fill text-warning"></i> Winners: ${winnerText}</div>` : ''}
               </div>
@@ -759,6 +771,10 @@ async function editGiveaway(guildId, giveawayId, btn) {
   if (color === null) return;
   const winnerCount = prompt('Number of winners:', btn.dataset.winners || '1');
   if (winnerCount === null) return;
+  const claimTime = prompt('Claim time (e.g. 3d, 24h, 5m, leave empty for none):', btn.dataset.claim ? formatClaimTime(parseInt(btn.dataset.claim, 10)) : '');
+  if (claimTime === null) return;
+  const claimAction = prompt('If not claimed (reroll or void):', btn.dataset.claimaction || 'reroll');
+  if (claimAction === null) return;
 
   try {
     const res = await fetch(`/api/guild/${guildId}/giveaways/${giveawayId}`, {
@@ -770,6 +786,8 @@ async function editGiveaway(guildId, giveawayId, btn) {
         description: description.trim() || null,
         color: color.trim() || null,
         winnerCount: parseInt(winnerCount) || 1,
+        claimTime: claimTime.trim() || null,
+        claimAction: claimAction.trim() === 'void' ? 'void' : 'reroll',
       }),
     });
     const result = await res.json();

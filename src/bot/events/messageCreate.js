@@ -10,9 +10,10 @@ const { getBlockedExtensions, isBlockedFile, isBlockedByContentType, isImageAtta
 const { parseBannedDomains, checkForBannedLinks } = require('../utils/linkFilter');
 const { checkMessage } = require('../utils/wordFilter');
 const { getFilterWords, addFilterViolation, getRecentViolations, getWhitelist } = require('../../database/wordFilter');
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { db } = require('../../database/db');
-const { createThread, getOpenThread, getOpenThreadByChannel, closeThread } = require('../../database/modmail');
+const { getOpenThread, getOpenThreadByChannel, closeThread } = require('../../database/modmail');
+const { openModmailThread } = require('../utils/modmailThread');
 
 let addIncidentStmt;
 let countRecentIncidentsStmt;
@@ -158,46 +159,12 @@ async function handleDM(message) {
 
   // Create a new modmail thread
   try {
-    const category = await targetGuild.channels.fetch(targetSettings.modmail_category_id);
-    if (!category) {
-      logger.warn(`Modmail category ${targetSettings.modmail_category_id} not found in guild ${targetGuild.id}`);
+    const displayName = message.author.globalName || message.author.username;
+    const modmailChannel = await openModmailThread(client, targetGuild, message.author, targetSettings);
+    if (!modmailChannel) {
+      logger.warn(`Could not open a modmail thread for ${message.author.id} in guild ${targetGuild.id}`);
       return;
     }
-
-    const displayName = message.author.globalName || message.author.username;
-    const channelName = `modmail-${message.author.username.toLowerCase().replace(/[^a-z0-9]/g, '-')}`.slice(0, 100);
-
-    const modmailChannel = await targetGuild.channels.create({
-      name: channelName,
-      type: ChannelType.GuildText,
-      parent: category.id,
-      topic: `Modmail thread for ${displayName} (${message.author.id})`,
-      permissionOverwrites: [
-        {
-          id: targetGuild.roles.everyone.id,
-          deny: [PermissionFlagsBits.ViewChannel],
-        },
-        {
-          id: client.user.id,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels],
-        },
-      ],
-    });
-
-    // If a moderator role is set, give it access
-    if (targetSettings.moderator_role_id) {
-      try {
-        await modmailChannel.permissionOverwrites.create(targetSettings.moderator_role_id, {
-          ViewChannel: true,
-          SendMessages: true,
-        });
-      } catch (err) {
-        logger.warn(`Failed to set mod role permissions on modmail channel: ${err.message}`);
-      }
-    }
-
-    // Save to database
-    createThread(targetGuild.id, message.author.id, modmailChannel.id);
 
     // Send initial message with user info and close button
     let member;

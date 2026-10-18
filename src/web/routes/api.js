@@ -978,7 +978,7 @@ module.exports = function (client) {
   // ========== Giveaways ==========
 
   const { createGiveaway, setMessageId, getAllForGuild, getGiveaway: getGiveawayById, deleteGiveaway, updateGiveaway, getEntryCount: giveawayEntryCount } = require('../../database/giveaways');
-  const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickEligibleWinners } = require('../../bot/commands/giveaway');
+  const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickEligibleWinners, beginClaimWindow, dmClaimButtons } = require('../../bot/commands/giveaway');
   const { EmbedBuilder: GiveawayEmbed } = require('discord.js');
   const { parseDuration, formatDuration } = require('../../bot/utils/parseDuration');
 
@@ -1002,7 +1002,7 @@ module.exports = function (client) {
   // Create giveaway
   router.post('/guild/:guildId/giveaways', giveawayAccess, async (req, res) => {
     const { guildId } = req.params;
-    const { channelId, title, prize, description, color, winnerCount, duration } = req.body;
+    const { channelId, title, prize, description, color, winnerCount, duration, claimTime, claimAction } = req.body;
 
     if (!channelId || !prize || !duration) {
       return res.status(400).json({ error: 'channelId, prize, and duration are required' });
@@ -1012,6 +1012,16 @@ module.exports = function (client) {
     if (!durationMs) {
       return res.status(400).json({ error: 'Invalid duration. Examples: 30m, 1h, 2d' });
     }
+
+    let claimSeconds = null;
+    if (claimTime) {
+      const claimMs = parseDuration(claimTime);
+      if (!claimMs) {
+        return res.status(400).json({ error: 'Invalid claim time. Examples: 5s, 5m, 24h, 3d' });
+      }
+      claimSeconds = Math.round(claimMs / 1000);
+    }
+    const claimActionValue = claimAction === 'void' ? 'void' : 'reroll';
 
     const endsAt = new Date(Date.now() + durationMs).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
 
@@ -1028,7 +1038,7 @@ module.exports = function (client) {
       const giveaway = createGiveaway(
         guildId, channelId, req.user.id,
         title || '🎉 GIVEAWAY 🎉', prize, description || null,
-        color || null, parseInt(winnerCount) || 1, endsAt
+        color || null, parseInt(winnerCount) || 1, claimSeconds, claimActionValue, endsAt
       );
 
       const embed = buildGiveawayEmbed(giveaway, 0);
@@ -1059,19 +1069,34 @@ module.exports = function (client) {
       return res.status(404).json({ error: 'Giveaway not found' });
     }
 
-    const { title, prize, description, color, winnerCount } = req.body;
+    const { title, prize, description, color, winnerCount, claimTime, claimAction } = req.body;
     const newTitle = title !== undefined ? title : giveaway.title;
     const newPrize = prize !== undefined ? prize : giveaway.prize;
     const newDescription = description !== undefined ? description : giveaway.description;
     const newColor = color !== undefined ? color : giveaway.color;
     const newWinnerCount = winnerCount !== undefined ? parseInt(winnerCount) || 1 : giveaway.winner_count;
 
+    let newClaimTime = giveaway.claim_time;
+    if (claimTime !== undefined) {
+      if (claimTime) {
+        const claimMs = parseDuration(claimTime);
+        if (!claimMs) {
+          return res.status(400).json({ error: 'Invalid claim time. Examples: 5s, 5m, 24h, 3d' });
+        }
+        newClaimTime = Math.round(claimMs / 1000);
+      } else {
+        newClaimTime = null;
+      }
+    }
+
+    const newClaimAction = claimAction === 'void' || claimAction === 'reroll' ? claimAction : giveaway.claim_action;
+
     if (!newPrize) {
       return res.status(400).json({ error: 'Prize is required' });
     }
 
     try {
-      updateGiveaway(giveaway.id, newTitle, newPrize, newDescription, newColor, newWinnerCount);
+      updateGiveaway(giveaway.id, newTitle, newPrize, newDescription, newColor, newWinnerCount, newClaimTime, newClaimAction);
 
       // Update Discord message if active
       if (!giveaway.ended && giveaway.message_id) {
@@ -1153,6 +1178,8 @@ module.exports = function (client) {
 
       const winnerMentions = newWinners.map(id => `<@${id}>`);
       markGiveawayEnded(giveaway.id, JSON.stringify(newWinners));
+      const claimDeadline = beginClaimWindow(giveaway.id, giveaway.claim_time, { resetClaims: true });
+      const endedView = { ...giveaway, claim_deadline: claimDeadline };
 
       // Update Discord message
       try {
@@ -1162,15 +1189,20 @@ module.exports = function (client) {
           if (message) {
             const { buildEndedEmbed } = require('../../bot/commands/giveaway');
             await message.edit({
-              embeds: [buildEndedEmbed(giveaway, winnerMentions)],
+              embeds: [buildEndedEmbed(endedView, winnerMentions)],
               components: buildGiveawayButtons(giveaway.id, true),
             });
           }
-          await channel.send(`🎉 New winners rerolled for **${giveaway.prize}**: ${winnerMentions.join(', ')}! Congratulations!`);
+          const claimNote = claimDeadline
+            ? ` Check your DMs to claim within **${formatDuration(giveaway.claim_time * 1000)}**.`
+            : '';
+          await channel.send(`🎉 New winners rerolled for **${giveaway.prize}**: ${winnerMentions.join(', ')}! Congratulations!${claimNote}`);
         }
       } catch (err) {
         logger.warn(`Failed to update rerolled giveaway message: ${err.message}`);
       }
+
+      await dmClaimButtons(client, endedView, newWinners, claimDeadline);
 
       logger.info(`Giveaway ${giveaway.id} rerolled via dashboard by ${req.user.username}`);
       res.json({ success: true, winners: newWinners });

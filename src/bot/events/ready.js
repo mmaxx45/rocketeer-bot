@@ -3,8 +3,8 @@ const config = require('../../config');
 const logger = require('../../logger');
 const { db } = require('../../database/db');
 const { getDueTempBans, markUnbanned } = require('../../database/tempbans');
-const { getExpiredGiveaways, getGiveaway } = require('../../database/giveaways');
-const { endGiveaway } = require('../commands/giveaway');
+const { getExpiredGiveaways, getGiveaway, getPendingClaimGiveaways } = require('../../database/giveaways');
+const { endGiveaway, expireUnclaimedWinners } = require('../commands/giveaway');
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
 
@@ -159,6 +159,26 @@ async function checkExpiredGiveaways(client) {
       logger.info(`Giveaway ${giveaway.id} auto-ended: prize=${giveaway.prize} guild=${giveaway.guild_id}`);
     } catch (err) {
       logger.error(`Error processing expired giveaway ${giveaway.id}: ${err.message}`);
+    }
+  }
+
+  // Invalidate winners who did not claim inside their claim window and reroll
+  let pendingClaims;
+  try {
+    pendingClaims = getPendingClaimGiveaways();
+  } catch (err) {
+    logger.error(`Failed to fetch expired giveaway claims: ${err.message}`);
+    return;
+  }
+
+  for (const giveaway of pendingClaims) {
+    try {
+      const result = await expireUnclaimedWinners(client, giveaway);
+      if (result) {
+        logger.info(`Giveaway ${giveaway.id} claim window processed: ${result.expired.length} expired, ${result.winners.length} winner(s) now`);
+      }
+    } catch (err) {
+      logger.error(`Error processing expired claims for giveaway ${giveaway.id}: ${err.message}`);
     }
   }
 }
