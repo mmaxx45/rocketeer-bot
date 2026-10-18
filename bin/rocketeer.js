@@ -320,7 +320,23 @@ function pruneBackups(dir) {
 
 function installDependencies(dir) {
   if (!haveCommand(IS_WINDOWS ? 'npm.cmd' : 'npm')) throw new Error('npm was not found on PATH');
-  run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: dir });
+  // Output (deprecation notices, package counts) only matters when it fails,
+  // and then run() includes the last lines in the error.
+  run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: dir, quiet: true });
+}
+
+// The global `rocketeer` command is a symlink into the installation. npm makes
+// the bin files executable when it links them, but an update replaces them
+// with the release's files, which must stay executable or the command breaks
+// ("Permission denied").
+function ensureExecutableBins(dir) {
+  if (IS_WINDOWS) return;
+  const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  const bins = typeof pkg.bin === 'string' ? [pkg.bin] : Object.values(pkg.bin || {});
+  for (const bin of bins) {
+    const file = path.join(dir, bin);
+    if (fs.existsSync(file)) fs.chmodSync(file, 0o755);
+  }
 }
 
 // When updating as root, hand the new files back to whoever owned the old
@@ -444,6 +460,7 @@ async function cmdUpdate(flags, config) {
 
     step('Installing dependencies');
     installDependencies(dir);
+    ensureExecutableBins(dir);
     fixOwnership(dir, flags, previousOwner);
 
     if (stopped) {
@@ -611,9 +628,30 @@ function createPrompter() {
   };
 }
 
+// Pasting into a terminal can bring extras that are invisible in hidden input:
+// bracketed-paste markers, other escape sequences, control characters,
+// surrounding quotes or spaces.
+function cleanAnswer(value) {
+  return value
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .trim()
+    .replace(/^(["'`])(.*)\1$/, '$2')
+    .trim();
+}
+
 const SETUP_FIELDS = [
   { key: 'DISCORD_TOKEN', label: 'Bot token', secret: true, required: true,
-    check: value => /^[\w-]+\.[\w-]+\.[\w-]+$/.test(value) || 'that does not look like a bot token (three parts separated by dots)' },
+    clean: value => value.replace(/^bot\s+/i, ''),
+    check: value => {
+      if (/^[\w-]+\.[\w-]+\.[\w-]+$/.test(value)) return true;
+      // The input is hidden, so say what is wrong without showing it.
+      const dots = (value.match(/\./g) || []).length;
+      const odd = value.replace(/[\w.-]/g, '');
+      return `that does not look like a bot token: got ${value.length} characters with ${dots} dot(s)` +
+        (odd ? ` and ${odd.length} character(s) a token never contains` : '') +
+        '; a bot token has three parts separated by two dots (Bot tab > Reset Token, then Copy)';
+    } },
   { key: 'DISCORD_CLIENT_ID', label: 'Application (client) ID', required: true,
     check: value => /^\d{17,20}$/.test(value) || 'the client ID is a 17-20 digit number' },
   { key: 'DISCORD_CLIENT_SECRET', label: 'OAuth2 client secret', secret: true, required: true,
@@ -638,7 +676,7 @@ async function cmdSetup(flags, config) {
     const unset = !current || current === ENV_PLACEHOLDERS[field.key];
     const hint = unset ? '' : field.secret ? ' [keep current]' : ` [${current}]`;
     for (;;) {
-      const answer = await prompter.ask(`  ${field.label}${hint}: `, { secret: field.secret });
+      let answer = await prompter.ask(`  ${field.label}${hint}: `, { secret: field.secret });
       if (answer === null) die('setup cancelled; nothing was changed');
       if (!answer) {
         if (unset && field.required) {
@@ -647,6 +685,8 @@ async function cmdSetup(flags, config) {
         }
         break;
       }
+      answer = cleanAnswer(answer);
+      if (field.clean) answer = field.clean(answer);
       const verdict = field.check(answer);
       if (verdict !== true) {
         warn(verdict);

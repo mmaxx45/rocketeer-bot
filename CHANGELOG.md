@@ -12,6 +12,19 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+### Fixed
+
+- After `rocketeer update` the `rocketeer` command itself stopped working
+  (`Permission denied`, or `command not found` with sudo): the release files were
+  not marked executable, and the update replaced the file the command links to.
+  Releases now ship it executable and `rocketeer update` makes sure it stays so.
+  If you already hit this: `sudo chmod 755 /opt/rocketeer/bin/rocketeer.js`.
+- `rocketeer setup` strips what a paste can bring along invisibly (paste markers,
+  quotes, spaces, a `Bot ` prefix) and, when a token is still wrong, says what is
+  wrong with it (length, dots) without showing it.
+- `rocketeer update` no longer prints npm's install output; it is shown only when
+  installing the dependencies fails.
+
 ## [1.2.2] - 2026-10-19
 
 ### Fixed
