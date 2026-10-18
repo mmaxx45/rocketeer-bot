@@ -336,6 +336,21 @@ function fixOwnership(dir, flags, previousOwner) {
   run('chown', ['-R', owner, dir], { quiet: true });
 }
 
+// Since 1.1.0 the bot refuses to start with the example SESSION_SECRET from
+// .env.example (anyone could forge a dashboard session with it). Older
+// installs made with `curl | bash` still have it, so replace it here rather
+// than let the updated bot fail to start. This only logs dashboard users out.
+function ensureSessionSecret(envFile) {
+  if (!fs.existsSync(envFile)) return;
+  const text = fs.readFileSync(envFile, 'utf8');
+  const match = text.match(/^SESSION_SECRET=(.*)$/m);
+  const value = match ? match[1].trim().replace(/^['"`]|['"`]$/g, '') : '';
+  if (match && value !== 'random_session_secret' && value.length >= 16) return;
+  const line = `SESSION_SECRET=${require('crypto').randomBytes(32).toString('hex')}`;
+  fs.writeFileSync(envFile, match ? text.replace(/^SESSION_SECRET=.*$/m, line) : text.replace(/\n?$/, '\n') + line + '\n');
+  step('Generated a new SESSION_SECRET (the old one was the example value or too short)');
+}
+
 // Replacing the installation renames it to a sibling backup, which needs write
 // access to the parent directory. Check up front, before anything is stopped.
 function assertCanReplace(dir) {
@@ -424,6 +439,7 @@ async function cmdUpdate(flags, config) {
       fs.rmSync(path.join(dir, keep), { recursive: true, force: true });
       copyInto(source, path.join(dir, keep));
     }
+    ensureSessionSecret(path.join(dir, '.env'));
 
     step('Installing dependencies');
     installDependencies(dir);

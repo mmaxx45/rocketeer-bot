@@ -158,11 +158,14 @@ step "Installing files into $DIR"
 if ! mkdir -p "$DIR" 2>/dev/null; then
   require_root mkdir -p "$DIR" || die "cannot create $DIR - run as root, or choose a writable --dir"
 fi
+# Never copy local state: with --local the checkout may hold a developer's .env
+# and database, and on a re-run they would overwrite the installed ones.
+COPY_EXCLUDES=(--exclude='./node_modules' --exclude='./.git' --exclude='./.env' --exclude='./data' --exclude='./docker-compose.yml')
 if [ "$(cd "$SOURCE_DIR" && pwd)" != "$(cd "$DIR" && pwd)" ]; then
   if [ -w "$DIR" ]; then
-    (cd "$SOURCE_DIR" && tar --exclude='./node_modules' --exclude='./.git' -cf - .) | tar -xf - -C "$DIR"
+    (cd "$SOURCE_DIR" && tar "${COPY_EXCLUDES[@]}" -cf - .) | tar -xf - -C "$DIR"
   else
-    (cd "$SOURCE_DIR" && tar --exclude='./node_modules' --exclude='./.git' -cf - .) | require_root tar -xf - -C "$DIR"
+    (cd "$SOURCE_DIR" && tar "${COPY_EXCLUDES[@]}" -cf - .) | require_root tar -xf - -C "$DIR"
   fi
 fi
 
@@ -221,6 +224,14 @@ if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
   ask DISCORD_CLIENT_SECRET "OAuth client secret" 1
   ask PORT "Dashboard port"
   ask DASHBOARD_URL "Public dashboard URL"
+  # The OAuth callback lives under the dashboard URL; left on the localhost
+  # default, dashboard login fails on any real host.
+  dashboard_url="$(grep -E '^DASHBOARD_URL=' "$DIR/.env" | head -n1 | cut -d= -f2- | tr -d "\"'\r")"
+  if grep -qE '^DISCORD_CALLBACK_URL=http://localhost:3000/auth/discord/callback[[:space:]]*$' "$DIR/.env" \
+    && [ -n "$dashboard_url" ] && ! printf '%s' "$dashboard_url" | grep -q 'localhost'; then
+    set_env DISCORD_CALLBACK_URL "${dashboard_url%/}/auth/discord/callback"
+    printf '    set DISCORD_CALLBACK_URL to %s (add it as a redirect in the Discord developer portal)\n' "${dashboard_url%/}/auth/discord/callback"
+  fi
 elif [ "$INTERACTIVE" -eq 1 ]; then
   warn "no terminal attached (curl | bash), leaving the Discord values in $DIR/.env as placeholders"
 fi
@@ -350,6 +361,10 @@ if [ "$POSTGRES" = "docker" ]; then
   set_env DATABASE_CLIENT postgres
   set_env DATABASE_URL "$pg_url"
   set_env DATABASE_SSL false
+elif [ "$POSTGRES" = "creds" ] && [ -n "${DATABASE_URL:-}" ]; then
+  step "Using DATABASE_URL from the environment"
+  set_env DATABASE_CLIENT postgres
+  set_env DATABASE_URL "$DATABASE_URL"
 elif [ "$POSTGRES" = "creds" ]; then
   step "PostgreSQL connection details"
   pg_host="${PGHOST:-}"; pg_port="${PGPORT:-}"; pg_name="${PGDATABASE:-}"; pg_user="${PGUSER:-}"; pg_password="${PGPASSWORD:-}"
@@ -397,13 +412,21 @@ if [ "$WITH_SERVICE" -eq 1 ]; then
   elif [ "$IS_ROOT" -eq 0 ] && [ "${#AS_ROOT[@]}" -eq 0 ]; then
     warn "not root and sudo is unavailable, skipping the systemd unit (use --no-service to silence this)"
   else
+    [ "$SERVICE_USER" != "root" ] || warn "the bot will run as root; pass --user <name> to run it as an unprivileged user"
+    UNIT_AFTER="network-online.target"
+    UNIT_WANTS="network-online.target"
+    if [ "$POSTGRES" = "docker" ]; then
+      # The database container is started by Docker; start after it on boot.
+      UNIT_AFTER="$UNIT_AFTER docker.service"
+      UNIT_WANTS="$UNIT_WANTS docker.service"
+    fi
     step "Writing $SYSTEMD_DIR/$SERVICE.service"
     require_root mkdir -p "$SYSTEMD_DIR"
     require_root tee "$SYSTEMD_DIR/$SERVICE.service" >/dev/null <<EOF
 [Unit]
 Description=RocketeerBot Discord bot
-After=network-online.target
-Wants=network-online.target
+After=$UNIT_AFTER
+Wants=$UNIT_WANTS
 
 [Service]
 Type=simple
@@ -413,6 +436,9 @@ ExecStart=$(command -v node) src/index.js
 Environment=NODE_ENV=production
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
 
 [Install]
 WantedBy=multi-user.target

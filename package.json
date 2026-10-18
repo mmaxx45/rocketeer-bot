@@ -13,11 +13,12 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "deploy-commands": "node deploy-commands.js",
-    "rocketeer": "node bin/rocketeer.js"
+    "rocketeer": "node bin/rocketeer.js",
+    "db:sqlite-to-postgres": "node scripts/sqlite-to-postgres.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
-    "discord.js": "^14.16.3",
+    "discord.js": "^14.25.1",
     "dotenv": "^16.4.7",
     "ejs": "^3.1.10",
     "express": "^4.21.1",
