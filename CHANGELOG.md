@@ -12,6 +12,8 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-19
+
 ### Upgrade notes
 
 - The database migrates to schema version 27 on first start (dashboard sessions
