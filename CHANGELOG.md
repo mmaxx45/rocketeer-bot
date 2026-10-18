@@ -12,6 +12,8 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-10-19
+
 ### Fixed
 
 - After `rocketeer update` the `rocketeer` command itself stopped working
