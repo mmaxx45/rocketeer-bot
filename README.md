@@ -87,9 +87,15 @@ curl -fsSL https://raw.githubusercontent.com/mmaxx45/rocketeer-bot/main/install.
 
 `install.sh` needs no git checkout: it downloads the latest GitHub release into
 `/opt/rocketeer`, installs the production dependencies, creates `.env` from
-`.env.example`, prompts for your bot token and OAuth credentials, registers the slash
-commands, writes `/etc/systemd/system/rocketeerbot.service`, starts it, and installs
-the `rocketeer` command. Re-running it is safe - it keeps your `.env` and `data/`.
+`.env.example`, generates a `SESSION_SECRET`, prompts for your bot token and OAuth
+credentials, registers the slash commands, writes
+`/etc/systemd/system/rocketeerbot.service`, starts it, and installs the `rocketeer`
+command. Re-running it is safe - it keeps your `.env` and `data/`.
+
+Piped through `curl ... | bash` there is no terminal to prompt on, so the Discord
+values stay as placeholders and the service is only enabled, not started. Fill in
+`/opt/rocketeer/.env`, then run `rocketeer start`. To get the prompts instead, download
+the script first (see below).
 
 | Flag | What it does |
 | --- | --- |
@@ -133,6 +139,11 @@ in the new code, reinstalls production dependencies, starts the service and prin
 release notes. Your `.env` and `data/` (the SQLite database) are preserved, the last
 three backups are kept, and if anything fails it restores the previous version and
 starts it again.
+
+The backup is made next to the installation, so the update needs write access to its
+parent directory. With the default `/opt/rocketeer` that means `sudo rocketeer update`;
+the CLI checks this before it stops anything and hands the new files back to the
+user that owned the old installation.
 
 ```bash
 rocketeer update --dry-run             # show the plan, change nothing
