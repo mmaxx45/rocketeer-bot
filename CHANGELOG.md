@@ -12,6 +12,8 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-19
+
 ### Fixed
 
 - On Ubuntu the Node.js install could hang with Ctrl+C not working: needrestart's
