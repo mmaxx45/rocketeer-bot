@@ -67,7 +67,7 @@ while [ $# -gt 0 ]; do
     --no-deploy-commands) DEPLOY_COMMANDS=0; shift ;;
     --non-interactive) INTERACTIVE=0; shift ;;
     --install-node) INSTALL_NODE=1; shift ;;
-    --postgres) POSTGRES="${2:-}"; shift 2 ;;
+    --postgres) need_value "$@"; POSTGRES="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -236,23 +236,35 @@ as_owner mkdir -p "$DIR/data"
 step "Installing dependencies"
 (cd "$DIR" && as_owner npm ci --omit=dev --no-audit --no-fund)
 
-set_env_raw() {
-  local key="$1" value="$2"
-  if grep -qE "^${key}=" "$DIR/.env"; then
-    as_owner sed -i "s|^${key}=.*|${key}=${value}|" "$DIR/.env"
-  else
-    as_owner sh -c "printf '%s=%s\\n' '${key}' '${value}' >> '$DIR/.env'"
-  fi
+COMPOSE_FILE="$DIR/docker-compose.yml"
+
+# The password a previous run put in docker-compose.yml, if any. The Postgres
+# image only applies POSTGRES_PASSWORD when it initialises an empty volume, so
+# a re-run must keep using the original password.
+existing_docker_password() {
+  [ -f "$COMPOSE_FILE" ] || return 1
+  "$NODE_BIN" -e '
+    const text = require("fs").readFileSync(process.argv[1], "utf8");
+    const match = text.match(/POSTGRES_PASSWORD:\s*(.+)/);
+    if (!match) process.exit(1);
+    let value = match[1].trim();
+    if (value.startsWith("\"")) value = JSON.parse(value);
+    process.stdout.write(value.replace(/\$\$/g, "$"));
+  ' "$COMPOSE_FILE"
 }
 
 start_postgres_docker() {
-  local password="$1"
+  local password="$1" host_port="$2"
   command -v docker >/dev/null 2>&1 || die "docker was not found - choose the credentials option instead (--postgres creds)"
   if ! docker compose version >/dev/null 2>&1; then
     die "docker compose v2 is required for the docker option (or use --postgres creds)"
   fi
-  step "Writing $DIR/docker-compose.yml"
-  as_owner tee "$DIR/docker-compose.yml" >/dev/null <<EOF
+  # JSON strings are valid YAML double-quoted scalars; $ is doubled because
+  # compose interpolates it.
+  local yaml_password
+  yaml_password="$("$NODE_BIN" -e 'process.stdout.write(JSON.stringify(process.argv[1].replace(/\$/g, "$$$$")))' "$password")"
+  step "Writing $COMPOSE_FILE"
+  as_owner tee "$COMPOSE_FILE" >/dev/null <<EOF
 services:
   postgres:
     image: postgres:17-alpine
@@ -260,9 +272,9 @@ services:
     environment:
       POSTGRES_DB: rocketeerbot
       POSTGRES_USER: rocketeerbot
-      POSTGRES_PASSWORD: $password
+      POSTGRES_PASSWORD: $yaml_password
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:$host_port:5432"
     volumes:
       - rocketeerbot-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -274,8 +286,9 @@ services:
 volumes:
   rocketeerbot-pgdata:
 EOF
+  as_owner chmod 600 "$COMPOSE_FILE"
   step "Starting Postgres in Docker"
-  (cd "$DIR" && docker compose up -d)
+  (cd "$DIR" && docker compose up -d) || die "could not start Postgres - is port $host_port already in use? Re-run with PGPORT=<free port>"
   step "Waiting for Postgres to accept connections"
   local tries=0
   until (cd "$DIR" && docker compose exec -T postgres pg_isready -U rocketeerbot -d rocketeerbot >/dev/null 2>&1); do
@@ -288,20 +301,36 @@ EOF
 }
 
 verify_postgres() {
-  step "Verifying the database connection and schema"
-  if ! (cd "$DIR" && node -e "const {db}=require('./src/database/db');db.runMigrations().then(()=>{console.log('schema ready ('+db.client+')')}).catch(e=>{console.error(e.message);process.exit(1)})"); then
-    warn "could not reach Postgres - fix DATABASE_URL/PG* in $DIR/.env, then start the bot"
+  step "Verifying the database connection and creating the schema"
+  if ! (cd "$DIR" && as_owner "$NODE_BIN" -e '
+    const { db } = require("./src/database/db");
+    db.runMigrations()
+      .then(() => console.log("    schema ready (" + db.client + ")"))
+      .catch(err => { console.error("    " + err.message); process.exitCode = 1; })
+      .finally(() => db.close());
+  '); then
+    warn "could not reach Postgres - fix DATABASE_URL / PG* in $DIR/.env, then start the bot"
     return 1
   fi
   return 0
 }
 
-PG_PASSWORD_VALUE=""
+case "$POSTGRES" in
+  ""|none|docker|creds) ;;
+  *) die "--postgres must be none, docker or creds" ;;
+esac
+
 if [ -z "$POSTGRES" ]; then
   if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
     read -r -p "    Use PostgreSQL instead of SQLite? [y/N]: " use_pg || use_pg=""
     case "$use_pg" in
-      [Yy]*) POSTGRES="ask" ;;
+      [Yy]*)
+        read -r -p "    Set up Postgres with Docker, or enter existing credentials? [docker/creds]: " pg_mode || pg_mode=""
+        case "$pg_mode" in
+          [Cc]*) POSTGRES="creds" ;;
+          *) POSTGRES="docker" ;;
+        esac
+        ;;
       *) POSTGRES="none" ;;
     esac
   else
@@ -309,20 +338,18 @@ if [ -z "$POSTGRES" ]; then
   fi
 fi
 
-if [ "$POSTGRES" = "ask" ]; then
-  read -r -p "    Set up Postgres with Docker, or enter existing credentials? [docker/creds]: " pg_mode || pg_mode=""
-  case "$pg_mode" in
-    [Cc]*) POSTGRES="creds" ;;
-    *) POSTGRES="docker" ;;
-  esac
-fi
-
 if [ "$POSTGRES" = "docker" ]; then
-  PG_PASSWORD_VALUE="${PGPASSWORD:-$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
-  start_postgres_docker "$PG_PASSWORD_VALUE"
-  set_env_raw DATABASE_CLIENT postgres
-  set_env_raw DATABASE_URL "postgres://rocketeerbot:${PG_PASSWORD_VALUE}@127.0.0.1:5432/rocketeerbot"
-  set_env_raw DATABASE_SSL false
+  pg_host_port="${PGPORT:-5432}"
+  if pg_password="$(existing_docker_password)"; then
+    printf '    reusing the Postgres password from %s\n' "$COMPOSE_FILE"
+  else
+    pg_password="${PGPASSWORD:-$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
+  fi
+  start_postgres_docker "$pg_password" "$pg_host_port"
+  pg_url="$("$NODE_BIN" -e 'process.stdout.write("postgres://rocketeerbot:" + encodeURIComponent(process.argv[1]) + "@127.0.0.1:" + process.argv[2] + "/rocketeerbot")' "$pg_password" "$pg_host_port")"
+  set_env DATABASE_CLIENT postgres
+  set_env DATABASE_URL "$pg_url"
+  set_env DATABASE_SSL false
 elif [ "$POSTGRES" = "creds" ]; then
   step "PostgreSQL connection details"
   pg_host="${PGHOST:-}"; pg_port="${PGPORT:-}"; pg_name="${PGDATABASE:-}"; pg_user="${PGUSER:-}"; pg_password="${PGPASSWORD:-}"
@@ -337,16 +364,14 @@ elif [ "$POSTGRES" = "creds" ]; then
     fi
   fi
   pg_host="${pg_host:-localhost}"; pg_port="${pg_port:-5432}"; pg_name="${pg_name:-rocketeerbot}"; pg_user="${pg_user:-rocketeerbot}"
-  case "$pg_password" in
-    *'|'*) die "the password must not contain the | character (it breaks the .env rewrite)" ;;
-  esac
-  set_env_raw DATABASE_CLIENT postgres
-  set_env_raw PGHOST "$pg_host"
-  set_env_raw PGPORT "$pg_port"
-  set_env_raw PGDATABASE "$pg_name"
-  set_env_raw PGUSER "$pg_user"
-  set_env_raw PGPASSWORD "$pg_password"
-  set_env_raw DATABASE_URL ""
+  [ -n "$pg_password" ] || warn "no Postgres password given (set PGPASSWORD for --non-interactive installs)"
+  set_env DATABASE_CLIENT postgres
+  set_env PGHOST "$pg_host"
+  set_env PGPORT "$pg_port"
+  set_env PGDATABASE "$pg_name"
+  set_env PGUSER "$pg_user"
+  set_env PGPASSWORD "$pg_password"
+  set_env DATABASE_URL ""
 fi
 
 if [ "$POSTGRES" = "docker" ] || [ "$POSTGRES" = "creds" ]; then
