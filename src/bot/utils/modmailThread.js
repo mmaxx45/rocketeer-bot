@@ -1,6 +1,8 @@
 const { ChannelType, PermissionFlagsBits } = require('discord.js');
-const { createThread, getOpenThread } = require('../../database/modmail');
+const { createThread, getOpenThread, closeThread } = require('../../database/modmail');
 const logger = require('../../logger');
+
+const UNKNOWN_CHANNEL = 10003;
 
 function modmailChannelName(username) {
   return `modmail-${username.toLowerCase().replace(/[^a-z0-9]/g, '-')}`.slice(0, 100);
@@ -13,12 +15,17 @@ async function openModmailThread(client, guild, user, settings, { topic } = {}) 
 
   const existing = getOpenThread(guild.id, user.id);
   if (existing) {
+    let channel = null;
     try {
-      const channel = await guild.channels.fetch(existing.channel_id);
-      if (channel) return channel;
+      channel = await guild.channels.fetch(existing.channel_id);
     } catch (err) {
-      logger.warn(`Open modmail channel ${existing.channel_id} could not be fetched: ${err.message}`);
+      if (err.code !== UNKNOWN_CHANNEL) throw err;
     }
+    if (channel) return channel;
+    // The channel was deleted by hand: close the stale row (as handleDM does)
+    // so it cannot shadow the thread we are about to open.
+    closeThread(existing.id, client.user.id);
+    logger.warn(`Modmail channel ${existing.channel_id} not found, closed thread ${existing.id}`);
   }
 
   const category = await guild.channels.fetch(settings.modmail_category_id);

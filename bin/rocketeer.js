@@ -158,6 +158,14 @@ function haveCommand(command) {
 
 let warnedNoSystemctl = false;
 
+// Run `command args` as root: directly when we already are root, through sudo
+// otherwise. sudo has to be the command itself, not an argument to it.
+function asRoot(command, args) {
+  const needsRoot = typeof process.getuid === 'function' && process.getuid() !== 0;
+  if (needsRoot && haveCommand('sudo')) return ['sudo', [command, ...args]];
+  return [command, args];
+}
+
 function serviceCommand(verb, service, options = {}) {
   if (!haveCommand('systemctl')) {
     if (options.required) die('systemctl was not found; this command needs a systemd host');
@@ -167,16 +175,32 @@ function serviceCommand(verb, service, options = {}) {
     }
     return { status: 127 };
   }
-  const needsRoot = process.getuid && process.getuid() !== 0;
-  const prefix = needsRoot && haveCommand('sudo') ? ['sudo'] : [];
-  return run('systemctl', [...prefix, verb, service], options);
+  const [command, args] = asRoot('systemctl', [verb, service]);
+  return run(command, args, options);
 }
 
+// is-active is readable by any user, so it never needs sudo.
 function serviceIsActive(service) {
   if (!haveCommand('systemctl')) return null;
-  const prefix = process.getuid && process.getuid() !== 0 && haveCommand('sudo') ? ['sudo'] : [];
-  const result = spawn('systemctl', [...prefix, 'is-active', service], { quiet: true });
+  const result = spawn('systemctl', ['is-active', service], { quiet: true });
   return (result.stdout || '').trim();
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// A Type=simple unit reports "active" the moment it is started, even if the
+// bot crashes a second later. Watch it for a few seconds and only call it
+// healthy when it is still active at the end.
+function waitForHealthyService(service, seconds = 8) {
+  let state = serviceIsActive(service);
+  for (let i = 0; i < seconds; i++) {
+    sleep(1000);
+    state = serviceIsActive(service);
+    if (state === 'failed') break;
+  }
+  return state;
 }
 
 function request(url, options = {}, redirects = 0) {
@@ -272,7 +296,9 @@ function moveDir(source, destination) {
     fs.renameSync(source, destination);
   } catch (err) {
     if (err.code !== 'EXDEV') throw err;
-    copyInto(source, destination, { filter: p => !p.includes(`${path.sep}node_modules`) });
+    // Copy everything, node_modules included: a backup without dependencies
+    // could not be rolled back to.
+    copyInto(source, destination);
     fs.rmSync(source, { recursive: true, force: true });
   }
 }
@@ -296,11 +322,29 @@ function installDependencies(dir) {
   run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: dir });
 }
 
-function fixOwnership(dir, flags) {
+// When updating as root, hand the new files back to whoever owned the old
+// installation (the service user), unless --user / ROCKETEER_USER says
+// otherwise. Without this a `sudo rocketeer update` leaves data/ owned by root
+// and the bot can no longer write its database.
+function fixOwnership(dir, flags, previousOwner) {
   if (typeof process.getuid !== 'function' || process.getuid() !== 0) return;
   const user = flags.user || process.env.ROCKETEER_USER;
-  if (!user) return;
-  run('chown', ['-R', `${user}:`, dir], { allowFail: true, quiet: true });
+  let owner = null;
+  if (user) owner = `${user}:`;
+  else if (previousOwner && previousOwner.uid !== 0) owner = `${previousOwner.uid}:${previousOwner.gid}`;
+  if (!owner) return;
+  run('chown', ['-R', owner, dir], { quiet: true });
+}
+
+// Replacing the installation renames it to a sibling backup, which needs write
+// access to the parent directory. Check up front, before anything is stopped.
+function assertCanReplace(dir) {
+  const parent = path.dirname(dir);
+  try {
+    fs.accessSync(parent, fs.constants.W_OK);
+  } catch {
+    die(`cannot write to ${parent}, which the update needs for the backup of ${dir}. Re-run with sudo.`);
+  }
 }
 
 function printReleaseNotes(target, fromVersion, toVersion) {
@@ -340,6 +384,9 @@ async function cmdUpdate(flags, config) {
     return;
   }
 
+  assertCanReplace(dir);
+  const previousOwner = fs.statSync(dir);
+
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'rocketeer-update-'));
   const archive = path.join(work, 'release.tar.gz');
   step(`Downloading ${target.ref}`);
@@ -351,16 +398,23 @@ async function cmdUpdate(flags, config) {
   const backup = `${dir}.bak-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
   const restart = !flags['no-restart'];
   let stopped = false;
+  let movedToBackup = false;
 
   try {
     if (restart) {
       step(`Stopping ${service}`);
-      serviceCommand('stop', service, { allowFail: true });
-      stopped = true;
+      const result = serviceCommand('stop', service, { allowFail: true });
+      // 127 means there is no systemctl at all (already warned). Any other
+      // failure means the bot may still be running: never swap files under it.
+      if (result.status !== 0 && result.status !== 127) {
+        throw new Error(`could not stop ${service} (use --no-restart if the bot is not run by systemd)`);
+      }
+      stopped = result.status === 0;
     }
 
     step(`Replacing ${dir} (backup: ${path.basename(backup)})`);
     moveDir(dir, backup);
+    movedToBackup = true;
     fs.mkdirSync(dir, { recursive: true });
     copyInto(root, dir);
 
@@ -373,27 +427,35 @@ async function cmdUpdate(flags, config) {
 
     step('Installing dependencies');
     installDependencies(dir);
-    fixOwnership(dir, flags);
+    fixOwnership(dir, flags, previousOwner);
 
-    if (restart) {
+    if (stopped) {
       step(`Starting ${service}`);
       serviceCommand('start', service, { allowFail: true });
-      const state = serviceIsActive(service);
+      const state = waitForHealthyService(service);
       if (state && state !== 'active') {
         throw new Error(`${service} is ${state} after the update`);
       }
     }
   } catch (err) {
     warn(`update failed: ${err.message}`);
-    warn(`rolling back to ${currentPkg.version}`);
-    try {
-      fs.rmSync(dir, { recursive: true, force: true });
-      moveDir(backup, dir);
-      if (restart && stopped) serviceCommand('start', service, { allowFail: true });
-    } catch (restoreErr) {
-      die(`rollback failed: ${restoreErr.message} (your previous install is in ${backup})`);
+    // Only touch the installation directory once it has actually been moved
+    // aside; before that point it is still the live install and holds .env and
+    // the database.
+    if (movedToBackup) {
+      warn(`rolling back to ${currentPkg.version}`);
+      try {
+        if (stopped) serviceCommand('stop', service, { allowFail: true });
+        fs.rmSync(dir, { recursive: true, force: true });
+        moveDir(backup, dir);
+      } catch (restoreErr) {
+        die(`rollback failed: ${restoreErr.message} (your previous install is in ${backup})`);
+      }
     }
-    die('the update was rolled back; the previous version is running again');
+    if (stopped) serviceCommand('start', service, { allowFail: true });
+    die(movedToBackup
+      ? `the update was rolled back to ${currentPkg.version}`
+      : `nothing was changed; ${dir} is untouched`);
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
@@ -418,17 +480,18 @@ function cmdStatus(flags, config) {
   const state = serviceIsActive(service);
   if (state === null) die('systemctl was not found; this command needs a systemd host');
   out(`${service}: ${state}`);
-  run('systemctl', [...(process.getuid && process.getuid() !== 0 && haveCommand('sudo') ? ['sudo'] : []), 'status', service, '--no-pager', '--lines=5'], { allowFail: true });
+  const [command, args] = asRoot('systemctl', ['status', service, '--no-pager', '--lines=5']);
+  run(command, args, { allowFail: true });
   process.exit(state === 'active' ? 0 : 1);
 }
 
 function cmdLogs(flags, config) {
   const service = resolveService(flags, config);
   if (!haveCommand('journalctl')) die('journalctl was not found; this command needs a systemd host');
-  const prefix = process.getuid && process.getuid() !== 0 && haveCommand('sudo') ? ['sudo'] : [];
-  const args = [...prefix, '-u', service, '-n', flags.lines || '200', '--no-pager'];
-  if (flags.follow) args.push('-f');
-  const result = spawn('journalctl', args, {});
+  const journalArgs = ['-u', service, '-n', flags.lines || '200', '--no-pager'];
+  if (flags.follow) journalArgs.push('-f');
+  const [command, args] = asRoot('journalctl', journalArgs);
+  const result = spawn(command, args, {});
   process.exit(result.status === null ? 1 : result.status);
 }
 
@@ -453,7 +516,8 @@ function usage() {
   out('Usage: rocketeer <command> [options]');
   out('');
   out('Commands:');
-  out('  update            Install the latest GitHub release and restart the service');  out('  start             Start the systemd service');
+  out('  update            Install the latest GitHub release and restart the service');
+  out('  start             Start the systemd service');
   out('  stop              Stop the systemd service');
   out('  restart           Restart the systemd service');
   out('  status            Show the service state');

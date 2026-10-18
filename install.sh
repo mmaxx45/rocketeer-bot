@@ -51,12 +51,16 @@ PGDATABASE, PGUSER, PGPASSWORD, DATABASE_URL
 EOF
 }
 
+need_value() {
+  [ $# -ge 2 ] && [ -n "$2" ] && [ "${2#--}" = "$2" ] || die "missing value for $1"
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dir) DIR="${2:-}"; shift 2 ;;
-    --service-name) SERVICE="${2:-}"; shift 2 ;;
-    --user) SERVICE_USER="${2:-}"; shift 2 ;;
-    --ref) REF="${2:-}"; shift 2 ;;
+    --dir) need_value "$@"; DIR="$2"; shift 2 ;;
+    --service-name) need_value "$@"; SERVICE="$2"; shift 2 ;;
+    --user) need_value "$@"; SERVICE_USER="$2"; shift 2 ;;
+    --ref) need_value "$@"; REF="$2"; shift 2 ;;
     --local) USE_LOCAL=1; shift ;;
     --no-service) WITH_SERVICE=0; shift ;;
     --no-cli) WITH_CLI=0; shift ;;
@@ -168,9 +172,35 @@ if [ ! -f "$DIR/.env" ]; then
 fi
 as_owner chmod 600 "$DIR/.env"
 
+NODE_BIN="$(command -v node)"
+
+# Set KEY=value in .env, replacing an existing line or appending one. Done in
+# node rather than sed so that any character in the value (&, |, \, quotes, #)
+# is written literally; values that need it are quoted the way dotenv reads them.
 set_env() {
-  local key="$1" value="$2"
-  as_owner sed -i "s|^${key}=.*|${key}=${value}|" "$DIR/.env"
+  as_owner env ENV_FILE="$DIR/.env" ENV_KEY="$1" ENV_VALUE="$2" "$NODE_BIN" -e '
+    const fs = require("fs");
+    const { ENV_FILE: file, ENV_KEY: key, ENV_VALUE: raw } = process.env;
+    let value = raw;
+    if (/[\s#"'"'"'`\\]/.test(raw)) {
+      if (!raw.includes("'"'"'")) value = "'"'"'" + raw + "'"'"'";
+      else if (!raw.includes("`")) value = "`" + raw + "`";
+      else { console.error("error: the value for " + key + " cannot contain both '"'"' and `"); process.exit(1); }
+    }
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    const at = lines.findIndex(line => line.startsWith(key + "="));
+    if (at === -1) {
+      if (lines[lines.length - 1] === "") lines.splice(lines.length - 1, 0, key + "=" + value);
+      else lines.push(key + "=" + value);
+    } else {
+      lines[at] = key + "=" + value;
+    }
+    fs.writeFileSync(file, lines.join("\n"));
+  '
+}
+
+token_is_placeholder() {
+  grep -qE '^DISCORD_TOKEN=(your_bot_token)?[[:space:]]*$' "$DIR/.env"
 }
 
 if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
@@ -191,12 +221,15 @@ if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
   ask DISCORD_CLIENT_SECRET "OAuth client secret" 1
   ask PORT "Dashboard port"
   ask DASHBOARD_URL "Public dashboard URL"
-  if grep -q '^SESSION_SECRET=random_session_secret' "$DIR/.env"; then
-    set_env SESSION_SECRET "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    printf '    generated a SESSION_SECRET\n'
-  fi
 elif [ "$INTERACTIVE" -eq 1 ]; then
-  warn "no terminal attached, leaving $DIR/.env as copied from .env.example"
+  warn "no terminal attached (curl | bash), leaving the Discord values in $DIR/.env as placeholders"
+fi
+
+# Never leave the published example secret in place: anyone could forge a
+# dashboard session with it. This runs in every mode, including curl | bash.
+if grep -qE '^SESSION_SECRET=(random_session_secret)?[[:space:]]*$' "$DIR/.env" || ! grep -q '^SESSION_SECRET=' "$DIR/.env"; then
+  set_env SESSION_SECRET "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  printf '    generated a SESSION_SECRET\n'
 fi
 
 as_owner mkdir -p "$DIR/data"
@@ -321,7 +354,7 @@ if [ "$POSTGRES" = "docker" ] || [ "$POSTGRES" = "creds" ]; then
 fi
 
 if [ "$DEPLOY_COMMANDS" -eq 1 ]; then
-  if grep -qE '^DISCORD_TOKEN=(your_bot_token)?$' "$DIR/.env"; then
+  if token_is_placeholder; then
     warn "DISCORD_TOKEN is still a placeholder, skipping slash command registration"
   else
     step "Registering slash commands"
@@ -359,10 +392,18 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-    step "Enabling and starting $SERVICE"
     require_root systemctl daemon-reload
-    require_root systemctl enable --now "$SERVICE"
-    require_root systemctl --no-pager --lines=0 status "$SERVICE" || true
+    if token_is_placeholder; then
+      # Starting now would only crash-loop on the placeholder token.
+      step "Enabling $SERVICE (not starting it: DISCORD_TOKEN is still a placeholder)"
+      require_root systemctl enable "$SERVICE"
+    else
+      # restart, not start: on a re-run the old version may still be running.
+      step "Enabling and (re)starting $SERVICE"
+      require_root systemctl enable "$SERVICE"
+      require_root systemctl restart "$SERVICE"
+      require_root systemctl --no-pager --lines=0 status "$SERVICE" || true
+    fi
   fi
 fi
 
@@ -373,32 +414,39 @@ if [ "$WITH_CLI" -eq 1 ]; then
   fi
 fi
 
-CONFIG_TARGET_DIR="$CONFIG_DIR"
-if ! mkdir -p "$CONFIG_TARGET_DIR" 2>/dev/null; then
-  CONFIG_TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rocketeer"
-  mkdir -p "$CONFIG_TARGET_DIR" 2>/dev/null || true
+# The CLI reads /etc/rocketeer/config.json first, and a `sudo rocketeer` does
+# not see the invoking user's ~/.config, so prefer /etc (with sudo if needed)
+# and fall back to the user's config directory only when that is impossible.
+CONFIG_JSON="$("$NODE_BIN" -e 'process.stdout.write(JSON.stringify({ dir: process.argv[1], service: process.argv[2] }, null, 2) + "\n")' "$DIR" "$SERVICE")"
+CONFIG_TARGET_DIR=""
+if mkdir -p "$CONFIG_DIR" 2>/dev/null && [ -w "$CONFIG_DIR" ]; then
+  printf '%s\n' "$CONFIG_JSON" > "$CONFIG_DIR/config.json" && CONFIG_TARGET_DIR="$CONFIG_DIR"
+elif require_root mkdir -p "$CONFIG_DIR" 2>/dev/null \
+  && printf '%s\n' "$CONFIG_JSON" | require_root tee "$CONFIG_DIR/config.json" >/dev/null; then
+  CONFIG_TARGET_DIR="$CONFIG_DIR"
+else
+  USER_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rocketeer"
+  if mkdir -p "$USER_CONFIG_DIR" 2>/dev/null && [ -w "$USER_CONFIG_DIR" ]; then
+    printf '%s\n' "$CONFIG_JSON" > "$USER_CONFIG_DIR/config.json" && CONFIG_TARGET_DIR="$USER_CONFIG_DIR"
+  fi
 fi
 
-if [ -d "$CONFIG_TARGET_DIR" ] && [ -w "$CONFIG_TARGET_DIR" ]; then
-  step "Writing $CONFIG_TARGET_DIR/config.json"
-  tee "$CONFIG_TARGET_DIR/config.json" >/dev/null <<EOF
-{
-  "dir": "$DIR",
-  "service": "$SERVICE"
-}
-EOF
+if [ -n "$CONFIG_TARGET_DIR" ]; then
+  step "Wrote $CONFIG_TARGET_DIR/config.json"
 else
   warn "could not write a CLI config file; pass --dir and --service to rocketeer instead"
 fi
 
 printf '\nRocketeer is installed in %s\n' "$DIR"
-printf '  config     : %s\n' "$CONFIG_TARGET_DIR/config.json"
+[ -z "$CONFIG_TARGET_DIR" ] || printf '  config     : %s\n' "$CONFIG_TARGET_DIR/config.json"
 if [ "$WITH_SERVICE" -eq 1 ]; then
   printf '  service    : systemctl status %s\n' "$SERVICE"
   printf '  logs       : journalctl -u %s -f\n' "$SERVICE"
 fi
 printf '  edit env   : %s/.env\n' "$DIR"
 printf '  update     : rocketeer update\n'
-if [ "$INTERACTIVE" -eq 1 ] && grep -qE '^DISCORD_TOKEN=(your_bot_token)?$' "$DIR/.env"; then
-  printf '\nNext: put your real values in %s/.env, then start the bot.\n' "$DIR/.env"
+if token_is_placeholder; then
+  printf '\nNext: put your real Discord values in %s, then start the bot' "$DIR/.env"
+  if [ "$WITH_SERVICE" -eq 1 ]; then printf ' (rocketeer start)'; fi
+  printf '.\n'
 fi

@@ -195,7 +195,36 @@ function beginClaimWindow(giveawayId, claimTime, { resetClaims = false } = {}) {
   return deadline;
 }
 
+// Ending, expiring and rerolling a giveaway all await Discord API calls
+// (member checks, message edits) between reading and writing its winners. The
+// 30s sweeper, the End button, the slash command and the dashboard can all hit
+// the same giveaway, so serialise them per giveaway. A single bot process owns
+// the database, so an in-memory set is enough.
+const busyGiveaways = new Set();
+
+async function withGiveawayLock(giveawayId, fn) {
+  const key = Number(giveawayId);
+  if (busyGiveaways.has(key)) return { busy: true };
+  busyGiveaways.add(key);
+  try {
+    return { busy: false, value: await fn() };
+  } finally {
+    busyGiveaways.delete(key);
+  }
+}
+
+// Returns the winners, or null when the giveaway is already ended or another
+// caller is ending it right now.
 async function endGiveaway(client, giveaway) {
+  const result = await withGiveawayLock(giveaway.id, async () => {
+    const fresh = getGiveaway(giveaway.id);
+    if (!fresh || fresh.ended) return null;
+    return endGiveawayUnlocked(client, fresh);
+  });
+  return result.busy ? null : result.value;
+}
+
+async function endGiveawayUnlocked(client, giveaway) {
   let winners = [];
 
   // Edit the original message
@@ -289,7 +318,19 @@ async function endGiveaway(client, giveaway) {
 // reroll their slots among the remaining feasible entrants. Winners who did
 // claim keep their prize. Returns null when the guild is unavailable so the
 // sweeper retries on its next tick.
+// Returns null when the guild is unavailable, the claim window is no longer
+// pending, or another caller holds the giveaway.
 async function expireUnclaimedWinners(client, giveaway) {
+  const result = await withGiveawayLock(giveaway.id, async () => {
+    const fresh = getGiveaway(giveaway.id);
+    if (!fresh || !fresh.ended || !fresh.claim_deadline) return null;
+    if (new Date(fresh.claim_deadline + 'Z').getTime() > Date.now()) return null;
+    return expireUnclaimedWinnersUnlocked(client, fresh);
+  });
+  return result.busy ? null : result.value;
+}
+
+async function expireUnclaimedWinnersUnlocked(client, giveaway) {
   const guild = client.guilds.cache.get(giveaway.guild_id);
   if (!guild) {
     logger.warn(`Giveaway ${giveaway.id} claim window expired but guild ${giveaway.guild_id} not in cache yet, will retry`);
@@ -369,6 +410,7 @@ module.exports = {
   dmClaimButtons,
   endGiveaway,
   expireUnclaimedWinners,
+  withGiveawayLock,
 
   data: new SlashCommandBuilder()
     .setName('giveaway')
@@ -483,6 +525,9 @@ module.exports = {
       if (active.length === 1) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const winners = await endGiveaway(interaction.client, active[0]);
+        if (!winners) {
+          return interaction.editReply('That giveaway has already ended or is being ended right now.');
+        }
         const winnerText = winners.length > 0 ? winners.map(id => `<@${id}>`).join(', ') : 'No entries';
         await interaction.editReply(`Giveaway for **${active[0].prize}** ended! Winners: ${winnerText}`);
         return;
@@ -519,15 +564,23 @@ module.exports = {
         return interaction.editReply('No entries in the giveaway — cannot reroll.');
       }
 
-      const newWinners = await pickEligibleWinners(interaction.guild, entries, recent.winner_count);
+      const rerolled = await withGiveawayLock(recent.id, async () => {
+        const picked = await pickEligibleWinners(interaction.guild, entries, recent.winner_count);
+        if (picked.length === 0) return { newWinners: picked, claimDeadline: null };
+        markEnded(recent.id, JSON.stringify(picked));
+        const deadline = beginClaimWindow(recent.id, recent.claim_time, { resetClaims: true });
+        return { newWinners: picked, claimDeadline: deadline };
+      });
+      if (rerolled.busy) {
+        return interaction.editReply('That giveaway is being processed right now — try again in a moment.');
+      }
+
+      const { newWinners, claimDeadline } = rerolled.value;
       if (newWinners.length === 0) {
         return interaction.editReply('No eligible entries — every entrant has left the server.');
       }
 
       const winnerMentions = newWinners.map(id => `<@${id}>`);
-
-      markEnded(recent.id, JSON.stringify(newWinners));
-      const claimDeadline = beginClaimWindow(recent.id, recent.claim_time, { resetClaims: true });
       const endedView = { ...recent, claim_deadline: claimDeadline };
 
       // Update embed
