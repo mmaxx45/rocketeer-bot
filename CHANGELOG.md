@@ -12,6 +12,8 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-19
+
 ### Fixed
 
 - Installing Node.js no longer prints `WARNING: apt does not have a stable CLI

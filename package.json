@@ -1,6 +1,6 @@
 {
   "name": "rocketeerbot",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Professional Discord bot with crosspost detection, warning system, and web dashboard",
   "main": "src/index.js",
   "bin": {
