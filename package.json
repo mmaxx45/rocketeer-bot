@@ -1,12 +1,19 @@
 {
   "name": "rocketeerbot",
-  "version": "1.0.0",
+  "version": "1.1.0-beta",
   "description": "Professional Discord bot with crosspost detection, warning system, and web dashboard",
   "main": "src/index.js",
+  "bin": {
+    "rocketeer": "bin/rocketeer.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "deploy-commands": "node deploy-commands.js"
+    "deploy-commands": "node deploy-commands.js",
+    "rocketeer": "node bin/rocketeer.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

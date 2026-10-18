@@ -12,8 +12,24 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+## [1.1.0-beta] - 2026-10-18
+
 ### Added
 
+- `install.sh` installs Rocketeer on a Linux host in one command: it fetches the
+  latest GitHub release, installs production dependencies, creates `.env`,
+  registers the slash commands, writes and starts a systemd unit, and records the
+  installation path for the CLI. Flags cover `--dir`, `--ref`, `--local`,
+  `--service-name`, `--user`, `--no-service`, `--no-cli`, `--non-interactive` and
+  `--install-node`.
+- A `rocketeer` CLI (`bin/rocketeer.js`, zero dependencies, installed globally by
+  the installer) manages an installation: `update`, `start`, `stop`, `restart`,
+  `status`, `logs`, `version`. `rocketeer update` installs the newest GitHub
+  release, re-installs production dependencies, restarts the systemd service and
+  prints the release notes; it preserves `.env` and `data/`, keeps the previous
+  version as a backup, rolls back and restarts the old version if anything fails,
+  and supports `--dry-run`, `--prerelease`, `--ref`, `--no-restart` and
+  `--no-backup`.
 - Giveaways can require winners to claim their prize within a set window.
   `/giveaway create` takes `claimtime` (accepts `3d`, `24h`, `5m`, `5s`, ...)
   and `claimaction` (`reroll` or `void`, default `reroll`); the dashboard

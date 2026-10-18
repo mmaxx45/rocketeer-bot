@@ -77,9 +77,82 @@ Built with discord.js v14, better-sqlite3, Express, and EJS.
 
 ---
 
-## Setup
+## Installation
 
-### 1. Clone and install
+### One-line install (Linux with systemd)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mmaxx45/rocketeer-bot/main/install.sh | bash
+```
+
+`install.sh` needs no git checkout: it downloads the latest GitHub release into
+`/opt/rocketeer`, installs the production dependencies, creates `.env` from
+`.env.example`, prompts for your bot token and OAuth credentials, registers the slash
+commands, writes `/etc/systemd/system/rocketeerbot.service`, starts it, and installs
+the `rocketeer` command. Re-running it is safe - it keeps your `.env` and `data/`.
+
+| Flag | What it does |
+| --- | --- |
+| `--dir <path>` | Install somewhere other than `/opt/rocketeer` |
+| `--ref <ref>` | Install a specific tag or branch, e.g. `--ref v1.1.0-beta.1` |
+| `--local` | Install from the current checkout instead of downloading |
+| `--service-name <name>` | Name the systemd unit something else |
+| `--user <name>` | User that runs the bot (default: the invoking user) |
+| `--no-service` | Skip the systemd unit (for PM2 or a container) |
+| `--no-cli` | Skip the global `rocketeer` command |
+| `--no-deploy-commands` | Do not register slash commands |
+| `--non-interactive` | Do not prompt; keep `.env` as copied from `.env.example` |
+| `--install-node` | Install Node.js from NodeSource when it is missing |
+
+`bash install.sh --help` lists everything. Prefer to read the script first?
+
+```bash
+curl -fsSO https://raw.githubusercontent.com/mmaxx45/rocketeer-bot/main/install.sh
+bash install.sh
+```
+
+### The rocketeer CLI
+
+The installer puts a dependency-free `rocketeer` command on your PATH (it is
+`bin/rocketeer.js`; refresh it any time with `npm install -g .` inside the install
+directory).
+
+```bash
+rocketeer status        # is the service running?
+rocketeer logs -f       # follow the journal
+rocketeer restart       # restart the service
+rocketeer start         # start the service
+rocketeer stop          # stop the service
+rocketeer version       # CLI, installation and service versions
+rocketeer update        # install the newest GitHub release and restart
+```
+
+**Updating.** `rocketeer update` resolves the newest GitHub release, downloads its
+tarball, stops the service, keeps the current install as `app.bak-<timestamp>`, swaps
+in the new code, reinstalls production dependencies, starts the service and prints the
+release notes. Your `.env` and `data/` (the SQLite database) are preserved, the last
+three backups are kept, and if anything fails it restores the previous version and
+starts it again.
+
+```bash
+rocketeer update --dry-run             # show the plan, change nothing
+rocketeer update --prerelease          # follow the beta channel
+rocketeer update --ref v1.1.0-beta.1   # pin a tag or branch
+rocketeer update --no-restart          # replace files without touching the service
+rocketeer update --no-backup           # discard the backup afterwards
+```
+
+The CLI locates the installation through `--dir`, `ROCKETEER_DIR`, or the config file
+written by the installer (`/etc/rocketeer/config.json`, or
+`~/.config/rocketeer/config.json` for unprivileged installs), and drives systemd with
+`sudo` when you are not root. `--service <name>` overrides the unit name.
+
+### Manual installation
+
+The installer automates the steps below - follow them if you would rather run the bot
+from a checkout, or on a host without systemd.
+
+#### 1. Clone and install
 
 ```bash
 git clone https://github.com/mmaxx45/rocketeer-bot.git
@@ -87,7 +160,7 @@ cd rocketeer-bot
 npm install
 ```
 
-### 2. Configure environment
+#### 2. Configure environment
 
 ```bash
 cp .env.example .env
@@ -112,7 +185,7 @@ TRUST_PROXY=false                # Set to true if behind nginx/Cloudflare
 LOG_LEVEL=info                   # debug, info, warn, error
 ```
 
-### 3. Enable privileged intents
+#### 3. Enable privileged intents
 
 In the [Discord Developer Portal](https://discord.com/developers/applications), go to your bot's settings → **Bot** tab and enable:
 
@@ -120,7 +193,7 @@ In the [Discord Developer Portal](https://discord.com/developers/applications), 
 - **Server Members Intent** — required for member lookups
 - **Presence Intent** — not required, can leave off
 
-### 4. Set bot permissions
+#### 4. Set bot permissions
 
 When generating an invite link, include these permissions:
 
@@ -143,7 +216,7 @@ Or use this URL pattern:
 https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=1376537725014&scope=bot%20applications.commands
 ```
 
-### 5. Register slash commands
+#### 5. Register slash commands
 
 ```bash
 npm run deploy-commands
@@ -151,13 +224,13 @@ npm run deploy-commands
 
 This registers commands globally (takes up to 1 hour to propagate). For instant registration during development, set `DEV_GUILD_ID` in `.env`.
 
-### 6. Configure OAuth2 redirect
+#### 6. Configure OAuth2 redirect
 
 In the Discord Developer Portal → **OAuth2** tab:
 - Add redirect URL: `http://yourdomain.com:3000/auth/discord/callback`
 - (Or `http://localhost:3000/auth/discord/callback` for local dev)
 
-### 7. Start the bot
+#### 7. Start the bot
 
 ```bash
 # Development (auto-reload)
@@ -169,9 +242,37 @@ npm start
 
 ---
 
-## Deployment with PM2
+## Deployment
 
-### Initial deployment
+### systemd (what the installer sets up)
+
+The one-line install writes `/etc/systemd/system/rocketeerbot.service` and starts it:
+
+```ini
+[Unit]
+Description=RocketeerBot Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rocketeer
+WorkingDirectory=/opt/rocketeer
+ExecStart=/usr/bin/node src/index.js
+Environment=NODE_ENV=production
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Drive it with the CLI (`rocketeer start|stop|restart|status|logs`) or with plain
+`systemctl restart rocketeerbot`.
+
+### PM2 (alternative)
+
+Install with `install.sh --no-service` and let PM2 supervise the bot instead:
 
 ```bash
 # Install PM2 globally
@@ -190,19 +291,15 @@ pm2 startup
 ### Updating the bot
 
 ```bash
-# Pull latest changes
-cd /path/to/rocketeer-bot
-git pull
+# Install the newest release (files and dependencies), without touching the service
+rocketeer update --no-restart
 
-# Install any new dependencies
-npm install
-
-# Re-register slash commands (if commands changed)
-npm run deploy-commands
-
-# Restart the bot
+# Restart under PM2 (or plain `node src/index.js`)
 pm2 restart rocketeerbot
 ```
+
+With systemd, `rocketeer update` handles the restart for you. If slash commands
+changed, run `npm run deploy-commands` from the install directory afterwards.
 
 ### PM2 commands
 
