@@ -125,26 +125,47 @@ node_major() {
   node -p 'process.versions.node.split(".")[0]'
 }
 
+# Runs a command with its output (stdout and stderr) captured, and shows the
+# output only when it fails. Package managers and the NodeSource setup script
+# are noisy (e.g. "apt does not have a stable CLI interface").
+quietly() {
+  local log code=0
+  log="$(mktemp)"
+  "$@" >"$log" 2>&1 || code=$?
+  if [ "$code" -ne 0 ]; then tail -n 40 "$log" >&2; fi
+  rm -f "$log"
+  return "$code"
+}
+
+# Downloads and runs a NodeSource repository setup script as root.
+nodesource_setup() {
+  local script
+  script="$(mktemp)"
+  curl -fsSL "$1" -o "$script" || { rm -f "$script"; die "could not download $1"; }
+  quietly require_root bash "$script" || { rm -f "$script"; die "the NodeSource setup script failed (output above)"; }
+  rm -f "$script"
+}
+
 install_node() {
   if [ "$IS_ROOT" -eq 0 ] && [ "${#AS_ROOT[@]}" -eq 0 ]; then
     die "Node.js $MIN_NODE_MAJOR or newer is required and installing it needs root or sudo. Install it yourself, or re-run as root."
   fi
   step "Installing Node.js $NODE_INSTALL_MAJOR"
   if command -v apt-get >/dev/null 2>&1; then
-    require_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    require_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl gnupg >/dev/null
-    curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | require_root bash - >/dev/null
-    require_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs >/dev/null
+    quietly require_root env DEBIAN_FRONTEND=noninteractive apt-get update
+    quietly require_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
+    nodesource_setup "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x"
+    quietly require_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
   elif command -v dnf >/dev/null 2>&1; then
-    curl -fsSL "https://rpm.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | require_root bash - >/dev/null
-    require_root dnf install -y -q nodejs
+    nodesource_setup "https://rpm.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x"
+    quietly require_root dnf install -y nodejs
   elif command -v yum >/dev/null 2>&1; then
-    curl -fsSL "https://rpm.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | require_root bash - >/dev/null
-    require_root yum install -y -q nodejs
+    nodesource_setup "https://rpm.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x"
+    quietly require_root yum install -y nodejs
   elif command -v apk >/dev/null 2>&1; then
-    require_root apk add --no-cache -q nodejs npm
+    quietly require_root apk add --no-cache nodejs npm
   elif command -v pacman >/dev/null 2>&1; then
-    require_root pacman -Sy --noconfirm --needed nodejs npm >/dev/null
+    quietly require_root pacman -Sy --noconfirm --needed nodejs npm
   else
     die "no supported package manager found (apt, dnf, yum, apk, pacman); install Node.js $MIN_NODE_MAJOR or newer yourself"
   fi

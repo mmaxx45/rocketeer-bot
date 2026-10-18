@@ -12,6 +12,12 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+### Fixed
+
+- Installing Node.js no longer prints `WARNING: apt does not have a stable CLI
+  interface` (from the NodeSource setup script) or other package manager noise; the
+  output of those steps is only shown when one of them fails.
+
 ## [1.2.0] - 2026-10-19
 
 ### Added
