@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const https = require('https');
+const readline = require('readline');
 
 const REPO_OWNER = 'mmaxx45';
 const REPO_NAME = 'rocketeer-bot';
@@ -481,8 +482,225 @@ async function cmdUpdate(flags, config) {
   printReleaseNotes(target, currentPkg.version, newVersion);
 }
 
-function cmdServiceVerb(verb, flags, config) {
+// ---------- .env and first-run setup ----------
+
+const ENV_PLACEHOLDERS = {
+  DISCORD_TOKEN: 'your_bot_token',
+  DISCORD_CLIENT_ID: 'your_client_id',
+  DISCORD_CLIENT_SECRET: 'your_client_secret',
+};
+const DEFAULT_CALLBACK = 'http://localhost:3000/auth/discord/callback';
+
+function unquoteEnv(raw) {
+  const value = raw.trim();
+  const quote = value[0];
+  if ((quote === '"' || quote === "'" || quote === '`') && value.endsWith(quote) && value.length >= 2) return value.slice(1, -1);
+  return value.replace(/\s+#.*$/, '');
+}
+
+// Quoted the way dotenv reads it back, like install.sh does.
+function quoteEnv(value) {
+  if (!/[\s#"'`\\]/.test(value)) return value;
+  if (!value.includes("'")) return `'${value}'`;
+  if (!value.includes('`')) return '`' + value + '`';
+  throw new Error('a value cannot contain both \' and `');
+}
+
+function parseEnv(text) {
+  const values = {};
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (match) values[match[1]] = unquoteEnv(match[2]);
+  }
+  return values;
+}
+
+// Replaces or appends KEY=value lines; writing in place keeps the file's
+// owner and mode.
+function writeEnv(file, updates) {
+  const eol = fs.readFileSync(file, 'utf8').includes('\r\n') ? '\r\n' : '\n';
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  for (const [key, value] of Object.entries(updates)) {
+    const line = `${key}=${quoteEnv(value)}`;
+    const at = lines.findIndex(l => l.startsWith(`${key}=`));
+    if (at !== -1) lines[at] = line;
+    else if (lines[lines.length - 1] === '') lines.splice(lines.length - 1, 0, line);
+    else lines.push(line);
+  }
+  fs.writeFileSync(file, lines.join(eol));
+}
+
+function missingCredentials(values) {
+  return Object.keys(ENV_PLACEHOLDERS).filter(key => !values[key] || values[key] === ENV_PLACEHOLDERS[key]);
+}
+
+function readEnvOrDie(envFile) {
+  try {
+    const text = fs.readFileSync(envFile, 'utf8');
+    fs.accessSync(envFile, fs.constants.W_OK);
+    return text;
+  } catch (err) {
+    if (err.code === 'ENOENT') die(`${envFile} does not exist; re-run install.sh`);
+    if (err.code === 'EACCES' || err.code === 'EPERM') die(`cannot read and write ${envFile}; re-run with sudo`);
+    throw err;
+  }
+}
+
+// One readline interface for a whole series of questions: lines that arrive
+// together (pasted, typed ahead) are queued instead of being lost between
+// interfaces. While a secret is typed nothing is echoed, not even on redraw.
+// ask() resolves to null when the input ends.
+function createPrompter() {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  // Echo is off between questions too: a line typed ahead may be the answer to
+  // a secret question that has not been asked yet.
+  let muted = true;
+  rl._writeToOutput = text => {
+    if (!muted) rl.output.write(text);
+  };
+  const queued = [];
+  let waiting = null;
+  let closed = false;
+  rl.on('line', line => {
+    if (waiting) {
+      const resolve = waiting;
+      waiting = null;
+      resolve(line);
+    } else {
+      queued.push(line);
+    }
+  });
+  rl.on('close', () => {
+    closed = true;
+    if (waiting) {
+      const resolve = waiting;
+      waiting = null;
+      resolve(null);
+    }
+  });
+  return {
+    ask(question, { secret = false } = {}) {
+      return new Promise(resolve => {
+        const finish = answer => {
+          if (muted || answer === null) process.stdout.write('\n');
+          muted = true;
+          resolve(answer === null ? null : answer.trim());
+        };
+        muted = false;
+        rl.setPrompt(question);
+        rl.prompt();
+        muted = secret;
+        if (queued.length > 0) {
+          // Typed ahead, so it was not echoed: show it now unless it is secret.
+          const answer = queued.shift();
+          if (!secret) {
+            process.stdout.write(answer);
+            muted = true;
+          }
+          finish(answer);
+        } else if (closed) {
+          finish(null);
+        } else {
+          waiting = finish;
+        }
+      });
+    },
+    close() {
+      rl.close();
+    },
+  };
+}
+
+const SETUP_FIELDS = [
+  { key: 'DISCORD_TOKEN', label: 'Bot token', secret: true, required: true,
+    check: value => /^[\w-]+\.[\w-]+\.[\w-]+$/.test(value) || 'that does not look like a bot token (three parts separated by dots)' },
+  { key: 'DISCORD_CLIENT_ID', label: 'Application (client) ID', required: true,
+    check: value => /^\d{17,20}$/.test(value) || 'the client ID is a 17-20 digit number' },
+  { key: 'DISCORD_CLIENT_SECRET', label: 'OAuth2 client secret', secret: true, required: true,
+    check: value => !/\s/.test(value) || 'the client secret has no spaces' },
+  { key: 'DASHBOARD_URL', label: 'Public dashboard URL', required: false,
+    check: value => /^https?:\/\/[^\s/]+/.test(value) || 'use a full URL such as https://bot.example.com' },
+];
+
+// Prompts for the Discord credentials and the dashboard URL and writes .env.
+async function cmdSetup(flags, config) {
+  const dir = resolveDir(flags, config);
+  const envFile = path.join(dir, '.env');
+  const values = parseEnv(readEnvOrDie(envFile));
+  if (!process.stdin.isTTY) die('rocketeer setup needs a terminal to ask questions on; or edit ' + envFile + ' yourself');
+
+  out('Discord application settings - find them at https://discord.com/developers/applications');
+  out('(Bot tab: token; OAuth2 tab: client ID and secret). Press Enter to keep a current value.');
+  const updates = {};
+  const prompter = createPrompter();
+  for (const field of SETUP_FIELDS) {
+    const current = values[field.key];
+    const unset = !current || current === ENV_PLACEHOLDERS[field.key];
+    const hint = unset ? '' : field.secret ? ' [keep current]' : ` [${current}]`;
+    for (;;) {
+      const answer = await prompter.ask(`  ${field.label}${hint}: `, { secret: field.secret });
+      if (answer === null) die('setup cancelled; nothing was changed');
+      if (!answer) {
+        if (unset && field.required) {
+          warn(`${field.label} is required`);
+          continue;
+        }
+        break;
+      }
+      const verdict = field.check(answer);
+      if (verdict !== true) {
+        warn(verdict);
+        continue;
+      }
+      updates[field.key] = field.key === 'DASHBOARD_URL' ? answer.replace(/\/+$/, '') : answer;
+      break;
+    }
+  }
+  prompter.close();
+
+  // Keep the OAuth callback under the dashboard URL unless it was customised.
+  const dashboardUrl = updates.DASHBOARD_URL || values.DASHBOARD_URL;
+  const callback = values.DISCORD_CALLBACK_URL;
+  const derived = previous => `${String(previous || '').replace(/\/+$/, '')}/auth/discord/callback`;
+  if (updates.DASHBOARD_URL && (!callback || callback === DEFAULT_CALLBACK || callback === derived(values.DASHBOARD_URL))) {
+    updates.DISCORD_CALLBACK_URL = derived(updates.DASHBOARD_URL);
+  }
+
+  if (Object.keys(updates).length > 0) writeEnv(envFile, updates);
+  ensureSessionSecret(envFile);
+  out('');
+  out(Object.keys(updates).length > 0 ? `Saved ${envFile}.` : 'Nothing changed.');
+  if (dashboardUrl) {
+    out(`Make sure ${updates.DISCORD_CALLBACK_URL || callback || derived(dashboardUrl)} is listed under OAuth2 > Redirects in the developer portal.`);
+  }
+  return Object.keys(updates).length > 0;
+}
+
+// Before starting the bot, make sure it has credentials: ask for them on a
+// terminal, refuse otherwise (it would only crash-loop on the placeholders).
+async function ensureCredentials(flags, config) {
+  let dir;
+  try {
+    dir = resolveDir(flags, config);
+  } catch {
+    return;
+  }
+  const envFile = path.join(dir, '.env');
+  if (!fs.existsSync(envFile)) return;
+  const missing = missingCredentials(parseEnv(readEnvOrDie(envFile)));
+  if (missing.length === 0) return;
+  if (!process.stdin.isTTY) {
+    die(`${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not set in ${envFile}; run "rocketeer setup" first`);
+  }
+  out(`The Discord credentials are not set yet (${missing.join(', ')}).`);
+  await cmdSetup(flags, config);
+  if (missingCredentials(parseEnv(fs.readFileSync(envFile, 'utf8'))).length > 0) die('the credentials are still missing');
+  out('');
+}
+
+async function cmdServiceVerb(verb, flags, config) {
   const service = resolveService(flags, config);
+  if (verb === 'start' || verb === 'restart') await ensureCredentials(flags, config);
   step(`${verb} ${service}`);
   serviceCommand(verb, service, { required: true });
   if (verb !== 'stop') {
@@ -533,7 +751,8 @@ function usage() {
   out('');
   out('Commands:');
   out('  update            Install the latest GitHub release and restart the service');
-  out('  start             Start the systemd service');
+  out('  setup             Enter the Discord credentials and dashboard URL');
+  out('  start             Start the systemd service (asks for credentials if unset)');
   out('  stop              Stop the systemd service');
   out('  restart           Restart the systemd service');
   out('  status            Show the service state');
@@ -567,6 +786,8 @@ async function main() {
   switch (command) {
     case 'update':
       return cmdUpdate(flags, config);
+    case 'setup':
+      return cmdSetup(flags, config);
     case 'start':
       return cmdServiceVerb('start', flags, config);
     case 'stop':

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# The whole script is one { ... } block so bash reads all of it before running
+# anything: with `curl ... | bash` a cut-off download cannot run half a script,
+# and no command can swallow the rest of the script from stdin.
+{
 set -euo pipefail
 
 REPO_OWNER="mmaxx45"
@@ -7,6 +11,8 @@ PACKAGE_NAME="rocketeerbot"
 DEFAULT_DIR="/opt/rocketeer"
 DEFAULT_SERVICE="rocketeerbot"
 MIN_NODE_MAJOR=20
+# Installed when Node.js is missing or older than MIN_NODE_MAJOR (current LTS).
+NODE_INSTALL_MAJOR=22
 
 DIR=""
 SERVICE=""
@@ -17,7 +23,7 @@ WITH_SERVICE=1
 WITH_CLI=1
 DEPLOY_COMMANDS=1
 INTERACTIVE=1
-INSTALL_NODE=0
+INSTALL_NODE=1
 POSTGRES=""
 SYSTEMD_DIR="${ROCKETEER_SYSTEMD_DIR:-/etc/systemd/system}"
 CONFIG_DIR="${ROCKETEER_CONFIG_DIR:-/etc/rocketeer}"
@@ -42,7 +48,7 @@ Options:
   --no-cli                Do not install the global "rocketeer" command
   --no-deploy-commands    Do not register slash commands
   --non-interactive       Do not prompt; create .env from .env.example
-  --install-node          Install Node.js from NodeSource when it is missing
+  --no-install-node       Fail instead of installing Node.js when it is missing
   --postgres <mode>       Database: none (default), docker, or creds
   -h, --help              Show this help
 
@@ -67,6 +73,7 @@ while [ $# -gt 0 ]; do
     --no-deploy-commands) DEPLOY_COMMANDS=0; shift ;;
     --non-interactive) INTERACTIVE=0; shift ;;
     --install-node) INSTALL_NODE=1; shift ;;
+    --no-install-node) INSTALL_NODE=0; shift ;;
     --postgres) need_value "$@"; POSTGRES="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
@@ -94,7 +101,21 @@ as_owner() {
   if [ -w "$DIR" ]; then "$@"; else require_root "$@"; fi
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Prompts come from stdin when it is a terminal. With curl | bash stdin is the
+# script itself, so read the answers from the controlling terminal instead.
+PROMPT_IN=""
+if [ -t 0 ]; then
+  PROMPT_IN=/dev/stdin
+elif (exec </dev/tty) 2>/dev/null; then
+  PROMPT_IN=/dev/tty
+fi
+
+# Empty when the script is piped into bash (curl | bash): there is no file.
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [ -n "$SCRIPT_PATH" ] && [ -f "$SCRIPT_PATH" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+fi
 DIR="${DIR:-$DEFAULT_DIR}"
 SERVICE="${SERVICE:-$DEFAULT_SERVICE}"
 SERVICE_USER="${SERVICE_USER:-${SUDO_USER:-$(id -un)}}"
@@ -104,21 +125,50 @@ node_major() {
   node -p 'process.versions.node.split(".")[0]'
 }
 
-step "Checking Node.js"
-if NODE_MAJOR="$(node_major)"; then
-  if [ "$NODE_MAJOR" -lt "$MIN_NODE_MAJOR" ]; then
-    if [ "$INSTALL_NODE" -eq 0 ]; then
-      die "Node.js $MIN_NODE_MAJOR or newer is required (found $(node -v)). Re-run with --install-node, or upgrade Node yourself."
-    fi
-    step "Installing Node.js $MIN_NODE_MAJOR from NodeSource"
-    curl -fsSL "https://deb.nodesource.com/setup_${MIN_NODE_MAJOR}.x" | "${AS_ROOT[@]}" bash -
-    "${AS_ROOT[@]}" apt-get install -y nodejs
+install_node() {
+  if [ "$IS_ROOT" -eq 0 ] && [ "${#AS_ROOT[@]}" -eq 0 ]; then
+    die "Node.js $MIN_NODE_MAJOR or newer is required and installing it needs root or sudo. Install it yourself, or re-run as root."
   fi
+  step "Installing Node.js $NODE_INSTALL_MAJOR"
+  if command -v apt-get >/dev/null 2>&1; then
+    require_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    require_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl gnupg >/dev/null
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | require_root bash - >/dev/null
+    require_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs >/dev/null
+  elif command -v dnf >/dev/null 2>&1; then
+    curl -fsSL "https://rpm.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | require_root bash - >/dev/null
+    require_root dnf install -y -q nodejs
+  elif command -v yum >/dev/null 2>&1; then
+    curl -fsSL "https://rpm.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | require_root bash - >/dev/null
+    require_root yum install -y -q nodejs
+  elif command -v apk >/dev/null 2>&1; then
+    require_root apk add --no-cache -q nodejs npm
+  elif command -v pacman >/dev/null 2>&1; then
+    require_root pacman -Sy --noconfirm --needed nodejs npm >/dev/null
+  else
+    die "no supported package manager found (apt, dnf, yum, apk, pacman); install Node.js $MIN_NODE_MAJOR or newer yourself"
+  fi
+  hash -r
+  # An older node earlier in PATH (e.g. from nvm) would still win; prefer the
+  # one the package manager just installed.
+  if ! NODE_MAJOR="$(node_major)" || [ "$NODE_MAJOR" -lt "$MIN_NODE_MAJOR" ]; then
+    if [ -x /usr/bin/node ]; then PATH="/usr/bin:$PATH"; export PATH; hash -r; fi
+  fi
+  NODE_MAJOR="$(node_major)" || die "Node.js was installed but node is not on PATH"
+  [ "$NODE_MAJOR" -ge "$MIN_NODE_MAJOR" ] || die "the installed Node.js is $(node -v); $MIN_NODE_MAJOR or newer is required"
+  command -v npm >/dev/null 2>&1 || die "Node.js was installed without npm; install npm and re-run"
+}
+
+step "Checking Node.js"
+if NODE_MAJOR="$(node_major)" && [ "$NODE_MAJOR" -ge "$MIN_NODE_MAJOR" ] && command -v npm >/dev/null 2>&1; then
+  :
+elif [ "$INSTALL_NODE" -eq 1 ]; then
+  if command -v node >/dev/null 2>&1; then
+    printf '    found %s, which is too old or has no npm\n' "$(node -v)"
+  fi
+  install_node
 else
-  [ "$INSTALL_NODE" -eq 1 ] || die "Node.js $MIN_NODE_MAJOR or newer is required. Re-run with --install-node."
-  step "Installing Node.js $MIN_NODE_MAJOR from NodeSource"
-  curl -fsSL "https://deb.nodesource.com/setup_${MIN_NODE_MAJOR}.x" | "${AS_ROOT[@]}" bash -
-  "${AS_ROOT[@]}" apt-get install -y nodejs
+  die "Node.js $MIN_NODE_MAJOR or newer (with npm) is required. Install it, or re-run without --no-install-node."
 fi
 printf '    node %s\n' "$(node -v)"
 
@@ -127,6 +177,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 RESOLVED_REF="$REF"
 if [ "$USE_LOCAL" -eq 1 ]; then
+  [ -n "$SCRIPT_DIR" ] || die "--local needs the script to be run from a checkout (bash install.sh --local), not piped"
   if [ -f "$SCRIPT_DIR/package.json" ]; then
     SOURCE_DIR="$SCRIPT_DIR"
   else
@@ -206,16 +257,16 @@ token_is_placeholder() {
   grep -qE '^DISCORD_TOKEN=(your_bot_token)?[[:space:]]*$' "$DIR/.env"
 }
 
-if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
+if [ "$INTERACTIVE" -eq 1 ] && [ -n "$PROMPT_IN" ]; then
   step "Configuring $DIR/.env (press Enter to keep the current value)"
   ask() {
     local key="$1" label="$2" secret="${3:-0}" current answer
     current="$(grep -E "^${key}=" "$DIR/.env" | head -n1 | cut -d= -f2-)"
     if [ "$secret" -eq 1 ]; then
-      read -r -s -p "    $label [$key]: " answer || answer=""
+      read -r -s -p "    $label [$key]: " answer <"$PROMPT_IN" || answer=""
       printf '\n'
     else
-      read -r -p "    $label [$key]: " answer || answer=""
+      read -r -p "    $label [$key]: " answer <"$PROMPT_IN" || answer=""
     fi
     if [ -n "$answer" ]; then set_env "$key" "$answer"; fi
   }
@@ -233,7 +284,7 @@ if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
     printf '    set DISCORD_CALLBACK_URL to %s (add it as a redirect in the Discord developer portal)\n' "${dashboard_url%/}/auth/discord/callback"
   fi
 elif [ "$INTERACTIVE" -eq 1 ]; then
-  warn "no terminal attached (curl | bash), leaving the Discord values in $DIR/.env as placeholders"
+  warn "no terminal to prompt on, leaving the Discord values in $DIR/.env as placeholders"
 fi
 
 # Never leave the published example secret in place: anyone could forge a
@@ -332,11 +383,11 @@ case "$POSTGRES" in
 esac
 
 if [ -z "$POSTGRES" ]; then
-  if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
-    read -r -p "    Use PostgreSQL instead of SQLite? [y/N]: " use_pg || use_pg=""
+  if [ "$INTERACTIVE" -eq 1 ] && [ -n "$PROMPT_IN" ]; then
+    read -r -p "    Use PostgreSQL instead of SQLite? [y/N]: " use_pg <"$PROMPT_IN" || use_pg=""
     case "$use_pg" in
       [Yy]*)
-        read -r -p "    Set up Postgres with Docker, or enter existing credentials? [docker/creds]: " pg_mode || pg_mode=""
+        read -r -p "    Set up Postgres with Docker, or enter existing credentials? [docker/creds]: " pg_mode <"$PROMPT_IN" || pg_mode=""
         case "$pg_mode" in
           [Cc]*) POSTGRES="creds" ;;
           *) POSTGRES="docker" ;;
@@ -368,13 +419,13 @@ elif [ "$POSTGRES" = "creds" ] && [ -n "${DATABASE_URL:-}" ]; then
 elif [ "$POSTGRES" = "creds" ]; then
   step "PostgreSQL connection details"
   pg_host="${PGHOST:-}"; pg_port="${PGPORT:-}"; pg_name="${PGDATABASE:-}"; pg_user="${PGUSER:-}"; pg_password="${PGPASSWORD:-}"
-  if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
-    [ -n "$pg_host" ] || read -r -p "    Host [localhost]: " pg_host || pg_host=""
-    [ -n "$pg_port" ] || read -r -p "    Port [5432]: " pg_port || pg_port=""
-    [ -n "$pg_name" ] || read -r -p "    Database [rocketeerbot]: " pg_name || pg_name=""
-    [ -n "$pg_user" ] || read -r -p "    User [rocketeerbot]: " pg_user || pg_user=""
+  if [ "$INTERACTIVE" -eq 1 ] && [ -n "$PROMPT_IN" ]; then
+    [ -n "$pg_host" ] || read -r -p "    Host [localhost]: " pg_host <"$PROMPT_IN" || pg_host=""
+    [ -n "$pg_port" ] || read -r -p "    Port [5432]: " pg_port <"$PROMPT_IN" || pg_port=""
+    [ -n "$pg_name" ] || read -r -p "    Database [rocketeerbot]: " pg_name <"$PROMPT_IN" || pg_name=""
+    [ -n "$pg_user" ] || read -r -p "    User [rocketeerbot]: " pg_user <"$PROMPT_IN" || pg_user=""
     if [ -z "$pg_password" ]; then
-      read -r -s -p "    Password: " pg_password || pg_password=""
+      read -r -s -p "    Password: " pg_password <"$PROMPT_IN" || pg_password=""
       printf '\n'
     fi
   fi
@@ -406,6 +457,7 @@ if [ "$IS_ROOT" -eq 1 ] || [ "${#AS_ROOT[@]}" -gt 0 ]; then
   require_root chown -R "$SERVICE_USER:" "$DIR" || warn "could not chown $DIR to $SERVICE_USER"
 fi
 
+SERVICE_INSTALLED=0
 if [ "$WITH_SERVICE" -eq 1 ]; then
   if ! command -v systemctl >/dev/null 2>&1; then
     warn "systemctl was not found, skipping the service unit (re-run with --no-service to silence this)"
@@ -444,6 +496,7 @@ ProtectSystem=full
 WantedBy=multi-user.target
 EOF
     require_root systemctl daemon-reload
+    SERVICE_INSTALLED=1
     if token_is_placeholder; then
       # Starting now would only crash-loop on the placeholder token.
       step "Enabling $SERVICE (not starting it: DISCORD_TOKEN is still a placeholder)"
@@ -490,14 +543,21 @@ fi
 
 printf '\nRocketeer is installed in %s\n' "$DIR"
 [ -z "$CONFIG_TARGET_DIR" ] || printf '  config     : %s\n' "$CONFIG_TARGET_DIR/config.json"
-if [ "$WITH_SERVICE" -eq 1 ]; then
+if [ "$SERVICE_INSTALLED" -eq 1 ]; then
   printf '  service    : systemctl status %s\n' "$SERVICE"
   printf '  logs       : journalctl -u %s -f\n' "$SERVICE"
 fi
 printf '  edit env   : %s/.env\n' "$DIR"
 printf '  update     : rocketeer update\n'
 if token_is_placeholder; then
-  printf '\nNext: put your real Discord values in %s, then start the bot' "$DIR/.env"
-  if [ "$WITH_SERVICE" -eq 1 ]; then printf ' (rocketeer start)'; fi
-  printf '.\n'
+  if [ "$SERVICE_INSTALLED" -eq 1 ] && command -v rocketeer >/dev/null 2>&1; then
+    printf '\nNext: run "rocketeer start" - it asks for your Discord credentials, then starts the bot.\n'
+  elif command -v rocketeer >/dev/null 2>&1; then
+    printf '\nNext: run "rocketeer setup" to enter your Discord credentials, then "npm start" in %s.\n' "$DIR"
+  else
+    printf '\nNext: put your real Discord values in %s, then start the bot.\n' "$DIR/.env"
+  fi
 fi
+
+exit 0
+}
