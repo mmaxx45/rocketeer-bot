@@ -12,6 +12,14 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+### Added
+
+- PostgreSQL support: set `DATABASE_CLIENT=postgres` with `DATABASE_URL` or the `PG*`
+  values, or let `install.sh` ask - it can start Postgres in Docker (writing a
+  `docker-compose.yml`) or take credentials you provide, then verifies the connection
+  and creates the schema. The data layer is async end to end and SQLite remains the
+  default, so existing installs are unaffected. Postgres installs start empty.
+
 ### Fixed
 
 - `rocketeer update` no longer shells out to `systemctl` on a host without it: it

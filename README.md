@@ -103,6 +103,14 @@ the `rocketeer` command. Re-running it is safe - it keeps your `.env` and `data/
 | `--no-deploy-commands` | Do not register slash commands |
 | `--non-interactive` | Do not prompt; keep `.env` as copied from `.env.example` |
 | `--install-node` | Install Node.js from NodeSource when it is missing |
+| `--postgres <mode>` | Database: `none` (default, SQLite), `docker`, or `creds` |
+
+In an interactive run the installer asks whether to use PostgreSQL, and if so whether to
+start Postgres with Docker (it writes a `docker-compose.yml`, starts the container and
+waits until it accepts connections) or to use credentials you provide (host, port,
+database, user, password - or `DATABASE_URL`). Either way it verifies the connection
+and creates the schema before finishing. Non-interactive runs default to SQLite unless
+you pass `--postgres docker` or `--postgres creds` (with `PG*`/`DATABASE_URL` set).
 
 `bash install.sh --help` lists everything. Prefer to read the script first?
 
@@ -110,6 +118,52 @@ the `rocketeer` command. Re-running it is safe - it keeps your `.env` and `data/
 curl -fsSO https://raw.githubusercontent.com/mmaxx45/rocketeer-bot/main/install.sh
 bash install.sh
 ```
+
+### Database
+
+SQLite is the default and needs nothing: the bot keeps its database in
+`data/rocketeerbot.db`.
+
+PostgreSQL is supported for fresh installs. Point the bot at a server with either a
+connection URL or the individual `PG*` values:
+
+```env
+DATABASE_CLIENT=postgres
+DATABASE_URL=postgres://rocketeerbot:password@127.0.0.1:5432/rocketeerbot
+# or
+# PGHOST=127.0.0.1
+# PGPORT=5432
+# PGDATABASE=rocketeerbot
+# PGUSER=rocketeerbot
+# PGPASSWORD=password
+# DATABASE_SSL=false
+# DATABASE_POOL_SIZE=10
+```
+
+The schema is created automatically the first time the bot starts against an empty
+database, and the installer verifies the connection for you. To run Postgres
+locally, the installer's Docker option produces:
+
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rocketeerbot
+      POSTGRES_USER: rocketeerbot
+      POSTGRES_PASSWORD: <generated>
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - rocketeerbot-pgdata:/var/lib/postgresql/data
+
+volumes:
+  rocketeerbot-pgdata:
+```
+
+Switching an existing SQLite install to Postgres is not automated yet - Postgres
+starts empty.
 
 ### The rocketeer CLI
 

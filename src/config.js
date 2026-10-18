@@ -16,7 +16,16 @@ module.exports = {
     callbackUrl: process.env.DISCORD_CALLBACK_URL || 'http://localhost:3000/auth/discord/callback',
   },
   database: {
+    client: process.env.DATABASE_CLIENT || 'sqlite',
     path: process.env.DATABASE_PATH || './data/rocketeerbot.db',
+    url: process.env.DATABASE_URL || null,
+    host: process.env.PGHOST || 'localhost',
+    port: parseInt(process.env.PGPORT, 10) || 5432,
+    name: process.env.PGDATABASE || 'rocketeerbot',
+    user: process.env.PGUSER || 'rocketeerbot',
+    password: process.env.PGPASSWORD || null,
+    ssl: process.env.DATABASE_SSL === 'true',
+    poolSize: parseInt(process.env.DATABASE_POOL_SIZE, 10) || 10,
   },
   web: {
     port: parseInt(process.env.PORT, 10) || 3000,

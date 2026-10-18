@@ -18,6 +18,7 @@ WITH_CLI=1
 DEPLOY_COMMANDS=1
 INTERACTIVE=1
 INSTALL_NODE=0
+POSTGRES=""
 SYSTEMD_DIR="${ROCKETEER_SYSTEMD_DIR:-/etc/systemd/system}"
 CONFIG_DIR="${ROCKETEER_CONFIG_DIR:-/etc/rocketeer}"
 
@@ -42,9 +43,11 @@ Options:
   --no-deploy-commands    Do not register slash commands
   --non-interactive       Do not prompt; create .env from .env.example
   --install-node          Install Node.js from NodeSource when it is missing
+  --postgres <mode>       Database: none (default), docker, or creds
   -h, --help              Show this help
 
-Environment: ROCKETEER_SYSTEMD_DIR, ROCKETEER_CONFIG_DIR
+Environment: ROCKETEER_SYSTEMD_DIR, ROCKETEER_CONFIG_DIR, PGHOST, PGPORT,
+PGDATABASE, PGUSER, PGPASSWORD, DATABASE_URL
 EOF
 }
 
@@ -60,6 +63,7 @@ while [ $# -gt 0 ]; do
     --no-deploy-commands) DEPLOY_COMMANDS=0; shift ;;
     --non-interactive) INTERACTIVE=0; shift ;;
     --install-node) INSTALL_NODE=1; shift ;;
+    --postgres) POSTGRES="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -198,6 +202,123 @@ fi
 as_owner mkdir -p "$DIR/data"
 step "Installing dependencies"
 (cd "$DIR" && as_owner npm ci --omit=dev --no-audit --no-fund)
+
+set_env_raw() {
+  local key="$1" value="$2"
+  if grep -qE "^${key}=" "$DIR/.env"; then
+    as_owner sed -i "s|^${key}=.*|${key}=${value}|" "$DIR/.env"
+  else
+    as_owner sh -c "printf '%s=%s\\n' '${key}' '${value}' >> '$DIR/.env'"
+  fi
+}
+
+start_postgres_docker() {
+  local password="$1"
+  command -v docker >/dev/null 2>&1 || die "docker was not found - choose the credentials option instead (--postgres creds)"
+  if ! docker compose version >/dev/null 2>&1; then
+    die "docker compose v2 is required for the docker option (or use --postgres creds)"
+  fi
+  step "Writing $DIR/docker-compose.yml"
+  as_owner tee "$DIR/docker-compose.yml" >/dev/null <<EOF
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rocketeerbot
+      POSTGRES_USER: rocketeerbot
+      POSTGRES_PASSWORD: $password
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - rocketeerbot-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rocketeerbot -d rocketeerbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  rocketeerbot-pgdata:
+EOF
+  step "Starting Postgres in Docker"
+  (cd "$DIR" && docker compose up -d)
+  step "Waiting for Postgres to accept connections"
+  local tries=0
+  until (cd "$DIR" && docker compose exec -T postgres pg_isready -U rocketeerbot -d rocketeerbot >/dev/null 2>&1); do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 30 ]; then
+      die "Postgres did not become ready - check 'docker compose logs postgres' in $DIR"
+    fi
+    sleep 2
+  done
+}
+
+verify_postgres() {
+  step "Verifying the database connection and schema"
+  if ! (cd "$DIR" && node -e "const {db}=require('./src/database/db');db.runMigrations().then(()=>{console.log('schema ready ('+db.client+')')}).catch(e=>{console.error(e.message);process.exit(1)})"); then
+    warn "could not reach Postgres - fix DATABASE_URL/PG* in $DIR/.env, then start the bot"
+    return 1
+  fi
+  return 0
+}
+
+PG_PASSWORD_VALUE=""
+if [ -z "$POSTGRES" ]; then
+  if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
+    read -r -p "    Use PostgreSQL instead of SQLite? [y/N]: " use_pg || use_pg=""
+    case "$use_pg" in
+      [Yy]*) POSTGRES="ask" ;;
+      *) POSTGRES="none" ;;
+    esac
+  else
+    POSTGRES="none"
+  fi
+fi
+
+if [ "$POSTGRES" = "ask" ]; then
+  read -r -p "    Set up Postgres with Docker, or enter existing credentials? [docker/creds]: " pg_mode || pg_mode=""
+  case "$pg_mode" in
+    [Cc]*) POSTGRES="creds" ;;
+    *) POSTGRES="docker" ;;
+  esac
+fi
+
+if [ "$POSTGRES" = "docker" ]; then
+  PG_PASSWORD_VALUE="${PGPASSWORD:-$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
+  start_postgres_docker "$PG_PASSWORD_VALUE"
+  set_env_raw DATABASE_CLIENT postgres
+  set_env_raw DATABASE_URL "postgres://rocketeerbot:${PG_PASSWORD_VALUE}@127.0.0.1:5432/rocketeerbot"
+  set_env_raw DATABASE_SSL false
+elif [ "$POSTGRES" = "creds" ]; then
+  step "PostgreSQL connection details"
+  pg_host="${PGHOST:-}"; pg_port="${PGPORT:-}"; pg_name="${PGDATABASE:-}"; pg_user="${PGUSER:-}"; pg_password="${PGPASSWORD:-}"
+  if [ "$INTERACTIVE" -eq 1 ] && [ -t 0 ]; then
+    [ -n "$pg_host" ] || read -r -p "    Host [localhost]: " pg_host || pg_host=""
+    [ -n "$pg_port" ] || read -r -p "    Port [5432]: " pg_port || pg_port=""
+    [ -n "$pg_name" ] || read -r -p "    Database [rocketeerbot]: " pg_name || pg_name=""
+    [ -n "$pg_user" ] || read -r -p "    User [rocketeerbot]: " pg_user || pg_user=""
+    if [ -z "$pg_password" ]; then
+      read -r -s -p "    Password: " pg_password || pg_password=""
+      printf '\n'
+    fi
+  fi
+  pg_host="${pg_host:-localhost}"; pg_port="${pg_port:-5432}"; pg_name="${pg_name:-rocketeerbot}"; pg_user="${pg_user:-rocketeerbot}"
+  case "$pg_password" in
+    *'|'*) die "the password must not contain the | character (it breaks the .env rewrite)" ;;
+  esac
+  set_env_raw DATABASE_CLIENT postgres
+  set_env_raw PGHOST "$pg_host"
+  set_env_raw PGPORT "$pg_port"
+  set_env_raw PGDATABASE "$pg_name"
+  set_env_raw PGUSER "$pg_user"
+  set_env_raw PGPASSWORD "$pg_password"
+  set_env_raw DATABASE_URL ""
+fi
+
+if [ "$POSTGRES" = "docker" ] || [ "$POSTGRES" = "creds" ]; then
+  verify_postgres || true
+fi
 
 if [ "$DEPLOY_COMMANDS" -eq 1 ]; then
   if grep -qE '^DISCORD_TOKEN=(your_bot_token)?$' "$DIR/.env"; then
