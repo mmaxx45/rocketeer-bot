@@ -80,19 +80,49 @@ function buildGiveawayButtons(giveawayId, ended = false) {
   return [row];
 }
 
-function pickWinners(entries, count) {
+function shuffle(entries) {
   const shuffled = [...entries];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  return shuffled.slice(0, Math.min(count, shuffled.length));
+  return shuffled;
+}
+
+// Discord REST error codes meaning the entrant is definitely gone.
+const UNKNOWN_MEMBER = 10007;
+const UNKNOWN_USER = 10013;
+
+// An entrant who left the server is not a feasible winner. Cached members are
+// trusted; otherwise we ask the API. Only a definitive "unknown member/user"
+// answer disqualifies someone - any other failure is inconclusive, so we keep
+// the entrant rather than silently dropping a legitimate winner.
+async function isStillInGuild(guild, userId) {
+  if (guild.members.cache.has(userId)) return true;
+  try {
+    await guild.members.fetch(userId);
+    return true;
+  } catch (err) {
+    if (err.code === UNKNOWN_MEMBER || err.code === UNKNOWN_USER) return false;
+    logger.warn(`Could not verify membership of ${userId} in guild ${guild.id}: ${err.message}`);
+    return true;
+  }
+}
+
+// Draw winners from the shuffled entry pool, skipping anyone who has left the
+// server, and keep drawing until `count` feasible winners are found or the
+// pool is exhausted.
+async function pickEligibleWinners(guild, entries, count) {
+  const winners = [];
+  for (const userId of shuffle(entries)) {
+    if (winners.length >= count) break;
+    if (await isStillInGuild(guild, userId)) winners.push(userId);
+  }
+  return winners;
 }
 
 async function endGiveaway(client, giveaway) {
-  const entries = getEntries(giveaway.id);
-  const winners = pickWinners(entries, giveaway.winner_count);
-  const winnerMentions = winners.map(id => `<@${id}>`);
+  let winners = [];
 
   // Edit the original message
   try {
@@ -101,6 +131,10 @@ async function endGiveaway(client, giveaway) {
       logger.warn(`Giveaway ${giveaway.id} expired but guild ${giveaway.guild_id} not in cache yet, will retry`);
       return [];
     }
+
+    const entries = getEntries(giveaway.id);
+    winners = await pickEligibleWinners(guild, entries, giveaway.winner_count);
+    const winnerMentions = winners.map(id => `<@${id}>`);
 
     // Mark ended only after confirming guild is available
     markEnded(giveaway.id, JSON.stringify(winners));
@@ -119,6 +153,8 @@ async function endGiveaway(client, giveaway) {
         // Post winner announcement
         if (winners.length > 0) {
           await channel.send(`🎉 Congratulations ${winnerMentions.join(', ')}! You won **${giveaway.prize}**!`);
+        } else if (entries.length > 0) {
+          await channel.send(`Every entry for **${giveaway.prize}** has left the server — no eligible winners.`);
         } else {
           await channel.send(`No one entered the giveaway for **${giveaway.prize}**. No winners.`);
         }
@@ -168,7 +204,7 @@ module.exports = {
   buildGiveawayEmbed,
   buildEndedEmbed,
   buildGiveawayButtons,
-  pickWinners,
+  pickEligibleWinners,
   endGiveaway,
 
   data: new SlashCommandBuilder()
@@ -304,7 +340,11 @@ module.exports = {
         return interaction.editReply('No entries in the giveaway — cannot reroll.');
       }
 
-      const newWinners = pickWinners(entries, recent.winner_count);
+      const newWinners = await pickEligibleWinners(interaction.guild, entries, recent.winner_count);
+      if (newWinners.length === 0) {
+        return interaction.editReply('No eligible entries — every entrant has left the server.');
+      }
+
       const winnerMentions = newWinners.map(id => `<@${id}>`);
 
       markEnded(recent.id, JSON.stringify(newWinners));

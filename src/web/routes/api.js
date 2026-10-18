@@ -978,7 +978,7 @@ module.exports = function (client) {
   // ========== Giveaways ==========
 
   const { createGiveaway, setMessageId, getAllForGuild, getGiveaway: getGiveawayById, deleteGiveaway, updateGiveaway, getEntryCount: giveawayEntryCount } = require('../../database/giveaways');
-  const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickWinners } = require('../../bot/commands/giveaway');
+  const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickEligibleWinners } = require('../../bot/commands/giveaway');
   const { EmbedBuilder: GiveawayEmbed } = require('discord.js');
   const { parseDuration, formatDuration } = require('../../bot/utils/parseDuration');
 
@@ -1141,29 +1141,35 @@ module.exports = function (client) {
         return res.status(400).json({ error: 'No entries to reroll' });
       }
 
-      const newWinners = pickWinners(entries, giveaway.winner_count);
+      const guild = client.guilds.cache.get(giveaway.guild_id);
+      if (!guild) {
+        return res.status(400).json({ error: 'Bot is not in that server right now; cannot verify entrants' });
+      }
+
+      const newWinners = await pickEligibleWinners(guild, entries, giveaway.winner_count);
+      if (newWinners.length === 0) {
+        return res.status(400).json({ error: 'No eligible entries — every entrant has left the server' });
+      }
+
       const winnerMentions = newWinners.map(id => `<@${id}>`);
       markGiveawayEnded(giveaway.id, JSON.stringify(newWinners));
 
       // Update Discord message
-      const guild = client.guilds.cache.get(giveaway.guild_id);
-      if (guild) {
-        try {
-          const channel = await guild.channels.fetch(giveaway.channel_id);
-          if (channel) {
-            const message = await channel.messages.fetch(giveaway.message_id);
-            if (message) {
-              const { buildEndedEmbed } = require('../../bot/commands/giveaway');
-              await message.edit({
-                embeds: [buildEndedEmbed(giveaway, winnerMentions)],
-                components: buildGiveawayButtons(giveaway.id, true),
-              });
-            }
-            await channel.send(`🎉 New winners rerolled for **${giveaway.prize}**: ${winnerMentions.join(', ')}! Congratulations!`);
+      try {
+        const channel = await guild.channels.fetch(giveaway.channel_id);
+        if (channel) {
+          const message = await channel.messages.fetch(giveaway.message_id);
+          if (message) {
+            const { buildEndedEmbed } = require('../../bot/commands/giveaway');
+            await message.edit({
+              embeds: [buildEndedEmbed(giveaway, winnerMentions)],
+              components: buildGiveawayButtons(giveaway.id, true),
+            });
           }
-        } catch (err) {
-          logger.warn(`Failed to update rerolled giveaway message: ${err.message}`);
+          await channel.send(`🎉 New winners rerolled for **${giveaway.prize}**: ${winnerMentions.join(', ')}! Congratulations!`);
         }
+      } catch (err) {
+        logger.warn(`Failed to update rerolled giveaway message: ${err.message}`);
       }
 
       logger.info(`Giveaway ${giveaway.id} rerolled via dashboard by ${req.user.username}`);
