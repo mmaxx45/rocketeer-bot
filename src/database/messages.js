@@ -23,11 +23,41 @@ const cacheById = new Map();
 let cleanupTimer = null;
 let maxAgeSeconds = DEFAULT_MAX_AGE_SECONDS;
 
+// Message ids deleted recently, mapped to when. messageCreate caches a message
+// only after its async checks, so a message deleted right after it was sent can
+// reach cacheMessage after deleteMessage ran; it must not be cached then, or a
+// repost elsewhere would be flagged as a crosspost.
+const RECENTLY_DELETED_MS = 60 * 1000;
+const MAX_RECENTLY_DELETED = 10000;
+const recentlyDeleted = new Map();
+
+function rememberDeleted(messageId) {
+  recentlyDeleted.delete(messageId);
+  recentlyDeleted.set(messageId, Date.now());
+  // Map keeps insertion order, so the oldest entries come first.
+  const cutoff = Date.now() - RECENTLY_DELETED_MS;
+  for (const [id, at] of recentlyDeleted) {
+    if (recentlyDeleted.size <= MAX_RECENTLY_DELETED && at > cutoff) break;
+    recentlyDeleted.delete(id);
+  }
+}
+
+function wasRecentlyDeleted(messageId) {
+  const at = recentlyDeleted.get(messageId);
+  if (at === undefined) return false;
+  if (Date.now() - at > RECENTLY_DELETED_MS) {
+    recentlyDeleted.delete(messageId);
+    return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Public API — same function signatures as the old SQLite-backed module
 // ---------------------------------------------------------------------------
 
 function cacheMessage(guildId, channelId, userId, messageId, content, attachmentHashes) {
+  if (wasRecentlyDeleted(messageId)) return;
   const userKey = `${guildId}:${userId}`;
   const entry = {
     guildId,
@@ -90,6 +120,7 @@ function getRecentMessages(guildId, userId, excludeChannelId, windowSeconds = 30
 }
 
 function deleteMessage(messageId) {
+  rememberDeleted(messageId);
   const entry = cacheById.get(messageId);
   if (!entry) return;
 

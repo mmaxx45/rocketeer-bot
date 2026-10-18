@@ -10,7 +10,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!isModerator(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });

@@ -1,62 +1,47 @@
 const { db } = require('./db');
 
-let stmts;
-
-function getStmts() {
-  if (!stmts) {
-    stmts = {
-      createPanel: db.prepare(`INSERT INTO self_role_panels (guild_id, channel_id, message_id, title, description) VALUES (?, ?, ?, ?, ?)`),
-      getPanel: db.prepare(`SELECT * FROM self_role_panels WHERE id = ?`),
-      getPanelByMessage: db.prepare(`SELECT * FROM self_role_panels WHERE message_id = ?`),
-      getPanels: db.prepare(`SELECT * FROM self_role_panels WHERE guild_id = ? ORDER BY created_at DESC`),
-      updatePanel: db.prepare(`UPDATE self_role_panels SET title = ?, description = ? WHERE id = ?`),
-      deletePanel: db.prepare(`DELETE FROM self_role_panels WHERE id = ?`),
-      addRoleOption: db.prepare(`INSERT INTO self_role_options (panel_id, role_id, label, emoji, description, sort_order) VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM self_role_options WHERE panel_id = ?))`),
-      removeRoleOption: db.prepare(`DELETE FROM self_role_options WHERE panel_id = ? AND role_id = ?`),
-      getRoleOptions: db.prepare(`SELECT * FROM self_role_options WHERE panel_id = ? ORDER BY sort_order ASC`),
-    };
-  }
-  return stmts;
-}
-
-function createPanel(guildId, channelId, messageId, title, description) {
-  const s = getStmts();
-  s.createPanel.run(guildId, channelId, messageId, title, description || null);
-  return s.getPanelByMessage.get(messageId);
+async function createPanel(guildId, channelId, messageId, title, description) {
+  const id = await db.insert(
+    `INSERT INTO self_role_panels (guild_id, channel_id, message_id, title, description) VALUES (?, ?, ?, ?, ?)`,
+    [guildId, channelId, messageId, title, description || null]
+  );
+  return getPanel(id);
 }
 
 function getPanel(panelId) {
-  return getStmts().getPanel.get(panelId);
+  return db.get(`SELECT * FROM self_role_panels WHERE id = ?`, [panelId]);
 }
 
 function getPanelByMessage(messageId) {
-  return getStmts().getPanelByMessage.get(messageId);
+  return db.get(`SELECT * FROM self_role_panels WHERE message_id = ?`, [messageId]);
 }
 
 function getPanels(guildId) {
-  return getStmts().getPanels.all(guildId);
+  return db.all(`SELECT * FROM self_role_panels WHERE guild_id = ? ORDER BY created_at DESC, id DESC`, [guildId]);
 }
 
 function updatePanel(panelId, title, description) {
-  return getStmts().updatePanel.run(title, description || null, panelId);
+  return db.run(`UPDATE self_role_panels SET title = ?, description = ? WHERE id = ?`, [title, description || null, panelId]);
 }
 
 function deletePanel(panelId) {
-  return getStmts().deletePanel.run(panelId);
+  return db.run(`DELETE FROM self_role_panels WHERE id = ?`, [panelId]);
 }
 
-function addRoleOption(panelId, roleId, label, emoji, description) {
-  const s = getStmts();
-  s.addRoleOption.run(panelId, roleId, label || null, emoji || null, description || null, panelId);
-  return s.getRoleOptions.all(panelId);
+async function addRoleOption(panelId, roleId, label, emoji, description) {
+  await db.run(
+    `INSERT INTO self_role_options (panel_id, role_id, label, emoji, description, sort_order) VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM self_role_options WHERE panel_id = ?))`,
+    [panelId, roleId, label || null, emoji || null, description || null, panelId]
+  );
+  return getRoleOptions(panelId);
 }
 
 function removeRoleOption(panelId, roleId) {
-  return getStmts().removeRoleOption.run(panelId, roleId);
+  return db.run(`DELETE FROM self_role_options WHERE panel_id = ? AND role_id = ?`, [panelId, roleId]);
 }
 
 function getRoleOptions(panelId) {
-  return getStmts().getRoleOptions.all(panelId);
+  return db.all(`SELECT * FROM self_role_options WHERE panel_id = ? ORDER BY sort_order ASC, id ASC`, [panelId]);
 }
 
 module.exports = { createPanel, getPanel, getPanelByMessage, getPanels, updatePanel, deletePanel, addRoleOption, removeRoleOption, getRoleOptions };

@@ -1,8 +1,8 @@
 const crypto = require('crypto');
 const logger = require('../../logger');
-const { getSettings, getExemptChannels, getImageOnlyChannels } = require('../../database/settings');
+const { getSettings, parseJsonList } = require('../../database/settings');
 const { cacheMessage, getRecentMessages, deleteMessage } = require('../../database/messages');
-const { addWarning, getWarningCount } = require('../../database/warnings');
+const { addWarningNumbered } = require('../../database/warnings');
 const { addModAction } = require('../../database/modactions');
 const { getSimilarity, normalizeMessage, MIN_MESSAGE_LENGTH } = require('../utils/similarity');
 const { isExempt, isModerator } = require('../utils/permissions');
@@ -15,26 +15,22 @@ const { db } = require('../../database/db');
 const { getOpenThread, getOpenThreadByChannel, closeThread } = require('../../database/modmail');
 const { openModmailThread } = require('../utils/modmailThread');
 
-let addIncidentStmt;
-let countRecentIncidentsStmt;
-let countRecentIncidentsMinutesStmt;
-
 // Per-user lock to prevent race conditions when two identical messages arrive simultaneously
 const processingLocks = new Set();
 
-function getIncidentStmts() {
-  if (!addIncidentStmt) {
-    addIncidentStmt = db.prepare(
-      `INSERT INTO crosspost_incidents (guild_id, user_id, original_channel_id, original_message_content, crosspost_channel_id, crosspost_message_content, similarity_score, action_taken) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    countRecentIncidentsStmt = db.prepare(
-      `SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ? AND user_id = ? AND created_at > datetime('now', '-' || ? || ' hours')`
-    );
-    countRecentIncidentsMinutesStmt = db.prepare(
-      `SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ? AND user_id = ? AND created_at > datetime('now', '-' || ? || ' minutes')`
-    );
-  }
-  return { addIncidentStmt, countRecentIncidentsStmt, countRecentIncidentsMinutesStmt };
+function addIncident(guildId, userId, originalChannelId, originalContent, crosspostChannelId, crosspostContent, similarityScore, actionTaken) {
+  return db.run(
+    `INSERT INTO crosspost_incidents (guild_id, user_id, original_channel_id, original_message_content, crosspost_channel_id, crosspost_message_content, similarity_score, action_taken) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [guildId, userId, originalChannelId, originalContent, crosspostChannelId, crosspostContent, similarityScore, actionTaken]
+  );
+}
+
+async function countRecentIncidents(guildId, userId, amount, unit) {
+  const row = await db.get(
+    `SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ? AND user_id = ? AND created_at > datetime('now', '-' || ? || ' ${unit}')`,
+    [guildId, userId, amount]
+  );
+  return row.count;
 }
 
 const MAX_ATTACHMENT_HASH_SIZE = 25 * 1024 * 1024; // 25 MB (Discord default upload limit)
@@ -97,7 +93,29 @@ async function sendToWarnLogChannel(guild, settings, embed) {
   }
 }
 
-async function handleDM(message) {
+const UNKNOWN_CHANNEL = 10003;
+
+// DMs from one user are handled one at a time, so two quick messages can't
+// both see "no open thread" and each open a modmail channel; the second one
+// waits and is relayed into the thread the first one opened.
+const dmLocks = new Map();
+
+function withDmLock(userId, fn) {
+  const previous = dmLocks.get(userId) || Promise.resolve();
+  const next = previous.then(fn, fn);
+  const settled = next.catch(() => {});
+  dmLocks.set(userId, settled);
+  settled.then(() => {
+    if (dmLocks.get(userId) === settled) dmLocks.delete(userId);
+  });
+  return next;
+}
+
+function handleDM(message) {
+  return withDmLock(message.author.id, () => handleDMUnlocked(message));
+}
+
+async function handleDMUnlocked(message) {
   const client = message.client;
 
   // Find a guild where the user is a member and modmail is enabled
@@ -105,7 +123,7 @@ async function handleDM(message) {
   let targetSettings = null;
 
   for (const [, guild] of client.guilds.cache) {
-    const settings = getSettings(guild.id);
+    const settings = await getSettings(guild.id);
     if (!settings.modmail_enabled || !settings.modmail_category_id) continue;
 
     try {
@@ -122,13 +140,27 @@ async function handleDM(message) {
   if (!targetGuild) return;
 
   // Check if user already has an open thread
-  const existingThread = getOpenThread(targetGuild.id, message.author.id);
+  const existingThread = await getOpenThread(targetGuild.id, message.author.id);
 
   if (existingThread) {
-    // Relay message to existing modmail channel
+    let channel = null;
     try {
-      const channel = await targetGuild.channels.fetch(existingThread.channel_id);
-      if (channel) {
+      channel = await targetGuild.channels.fetch(existingThread.channel_id);
+    } catch (err) {
+      if (err.code !== UNKNOWN_CHANNEL) {
+        logger.error(`Failed to relay DM to modmail channel: ${err.message}`);
+        return;
+      }
+    }
+
+    if (!channel) {
+      // The channel was deleted by hand: close the stale thread and open a
+      // fresh one below, so the user can still reach the moderators.
+      await closeThread(existingThread.id, client.user.id);
+      logger.warn(`Modmail channel ${existingThread.channel_id} not found, closed thread ${existingThread.id}`);
+    } else {
+      // Relay message to existing modmail channel
+      try {
         const embed = new EmbedBuilder()
           .setAuthor({
             name: message.author.globalName || message.author.username,
@@ -146,15 +178,11 @@ async function handleDM(message) {
 
         await channel.send({ embeds: [embed] });
         await message.react('\u2709\uFE0F');
-      } else {
-        // Channel was deleted, close the thread
-        closeThread(existingThread.id, client.user.id);
-        logger.warn(`Modmail channel ${existingThread.channel_id} not found, closed thread ${existingThread.id}`);
+      } catch (err) {
+        logger.error(`Failed to relay DM to modmail channel: ${err.message}`);
       }
-    } catch (err) {
-      logger.error(`Failed to relay DM to modmail channel: ${err.message}`);
+      return;
     }
-    return;
   }
 
   // Create a new modmail thread
@@ -246,13 +274,12 @@ async function handleDM(message) {
   }
 }
 
-async function handleModmailReply(message) {
-  const thread = getOpenThreadByChannel(message.channel.id);
+async function handleModmailReply(message, settings) {
+  const thread = await getOpenThreadByChannel(message.channel.id);
   if (!thread) return false;
 
   // Only moderators should relay messages to the user
-  const modSettings = getSettings(message.guild.id);
-  if (!isModerator(message.member, modSettings)) return true; // Absorb but don't relay
+  if (!isModerator(message.member, settings)) return true; // Absorb but don't relay
 
   // This is a modmail channel - relay the mod's message to the user
   try {
@@ -302,20 +329,17 @@ module.exports = {
       return;
     }
 
+    // One settings read per message: everything below uses this row.
+    const guildId = message.guild.id;
+    const settings = await getSettings(guildId);
+
     // Check if this is a message in a modmail channel (mod replying)
-    if (message.guild) {
-      const mmSettings = getSettings(message.guild.id);
-      if (mmSettings.modmail_enabled && mmSettings.modmail_category_id) {
-        if (message.channel.parentId === mmSettings.modmail_category_id) {
-          const handled = await handleModmailReply(message);
-          if (handled) return;
-        }
-      }
+    if (settings.modmail_enabled && settings.modmail_category_id && message.channel.parentId === settings.modmail_category_id) {
+      const handled = await handleModmailReply(message, settings);
+      if (handled) return;
     }
 
-    const guildId = message.guild.id;
-    const settings = getSettings(guildId);
-    const exemptChannels = getExemptChannels(guildId);
+    const exemptChannels = parseJsonList(settings, 'exempt_channels');
 
     const hasContent = message.content && message.content.length > 0;
     const hasAttachments = message.attachments && message.attachments.size > 0;
@@ -447,9 +471,9 @@ module.exports = {
 
     // --- Word filter ---
     if (hasContent && !memberIsExempt && settings.filter_enabled) {
-      const filterWords = getFilterWords(guildId);
+      const filterWords = await getFilterWords(guildId);
       if (filterWords.length > 0) {
-        const whitelist = getWhitelist(guildId);
+        const whitelist = await getWhitelist(guildId);
         const matches = checkMessage(message.content, filterWords, whitelist);
         if (matches.length > 0) {
           // Use the highest severity match
@@ -463,17 +487,16 @@ module.exports = {
           }
 
           // Log violation
-          addFilterViolation(guildId, message.author.id, match.word, match.tier, message.content, message.channel.id);
+          await addFilterViolation(guildId, message.author.id, match.word, match.tier, message.content, message.channel.id);
 
           logger.info(`Word filter triggered: user=${message.author.username} guild=${guildId} word=${match.word} tier=${match.tier}`);
 
           if (match.tier === 'hard') {
             // Hard slur: auto-warn + log + DM
-            addWarning(guildId, message.author.id, message.client.user.id, `Automatic warning: used a prohibited word (hard filter)`, 'manual', message.content);
-            const warningCount = getWarningCount(guildId, message.author.id);
+            const warningCount = await addWarningNumbered(guildId, message.author.id, message.client.user.id, `Automatic warning: used a prohibited word (hard filter)`, 'manual', message.content);
 
             try {
-              addModAction(guildId, message.client.user.id, 'filter_warn', message.author.id, `Hard filter triggered: "${match.word}"`);
+              await addModAction(guildId, message.client.user.id, 'filter_warn', message.author.id, `Hard filter triggered: "${match.word}"`);
             } catch (err) {
               logger.warn(`Failed to log filter mod action: ${err.message}`);
             }
@@ -522,7 +545,7 @@ module.exports = {
             // Soft slur: check threshold
             const windowMinutes = settings.soft_slur_window_minutes || 60;
             const threshold = settings.soft_slur_threshold || 3;
-            const recentCount = getRecentViolations(guildId, message.author.id, windowMinutes);
+            const recentCount = await getRecentViolations(guildId, message.author.id, windowMinutes);
 
             // Log to warn channel
             if (settings.warn_log_channel_id) {
@@ -592,7 +615,7 @@ module.exports = {
 
     // --- Image-only channel enforcement ---
     if (!memberIsExempt && !isExemptChannel) {
-      const imageOnlyChannels = getImageOnlyChannels(guildId);
+      const imageOnlyChannels = parseJsonList(settings, 'image_only_channels');
       if (imageOnlyChannels.includes(message.channel.id)) {
         const messageHasMedia = hasMediaAttachments(message.attachments);
         // If the message has no image/video attachments, delete it
@@ -724,22 +747,19 @@ module.exports = {
     deleteMessage(bestMatch.message_id);
 
     // Record this incident first
-    const { addIncidentStmt: addInc, countRecentIncidentsStmt: countInc, countRecentIncidentsMinutesStmt: countIncMinutes } = getIncidentStmts();
-
     // Check how many PREVIOUS incidents this user had in the window (before recording this one)
-    const previousIncidentCount = countInc.get(guildId, message.author.id, repeatOffenseHours).count;
+    const previousIncidentCount = await countRecentIncidents(guildId, message.author.id, repeatOffenseHours, 'hours');
 
     if (previousIncidentCount > 0) {
       // This is a repeat offense (they already crossposted before within the window)
-      addInc.run(
+      await addIncident(
         guildId, message.author.id,
         bestMatch.channel_id, bestMatch.content,
         message.channel.id, message.content,
         bestScore, 'warned'
       );
 
-      addWarning(guildId, message.author.id, message.client.user.id, `Repeated crossposting between channels (similarity: ${bestScore.toFixed(1)}%)`, 'crosspost', message.content);
-      const warningCount = getWarningCount(guildId, message.author.id);
+      const warningCount = await addWarningNumbered(guildId, message.author.id, message.client.user.id, `Repeated crossposting between channels (similarity: ${bestScore.toFixed(1)}%)`, 'crosspost', message.content);
 
       // Build crosspost detail embed for the warning message
       const detailEmbed = buildCrosspostEmbed(
@@ -752,7 +772,7 @@ module.exports = {
       detailEmbed.setTimestamp();
 
       try {
-        addModAction(guildId, message.client.user.id, 'crosspost_warn', message.author.id, `Repeated crossposting between channels (similarity: ${bestScore.toFixed(1)}%)`);
+        await addModAction(guildId, message.client.user.id, 'crosspost_warn', message.author.id, `Repeated crossposting between channels (similarity: ${bestScore.toFixed(1)}%)`);
       } catch (err) {
         logger.warn(`Failed to log mod action: ${err.message}`);
       }
@@ -813,7 +833,7 @@ module.exports = {
       const kickWindowMinutes = settings.crosspost_kick_window_minutes || 60;
 
       // Count incidents in the kick window (including the one we just recorded)
-      const recentIncidentCount = countIncMinutes.get(guildId, message.author.id, kickWindowMinutes).count;
+      const recentIncidentCount = await countRecentIncidents(guildId, message.author.id, kickWindowMinutes, 'minutes');
 
       if (recentIncidentCount >= kickCount) {
         try {
@@ -823,7 +843,7 @@ module.exports = {
             logger.info(`Auto-kicked user ${message.author.username} from ${guildId}: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
 
             try {
-              addModAction(guildId, message.client.user.id, 'kick', message.author.id, `Auto-kicked: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
+              await addModAction(guildId, message.client.user.id, 'kick', message.author.id, `Auto-kicked: ${recentIncidentCount} crosspost incidents in ${kickWindowMinutes} minutes`);
             } catch (err) {
               logger.warn(`Failed to log kick mod action: ${err.message}`);
             }
@@ -859,7 +879,7 @@ module.exports = {
       }
     } else {
       // First offense in this window
-      addInc.run(
+      await addIncident(
         guildId, message.author.id,
         bestMatch.channel_id, bestMatch.content,
         message.channel.id, message.content,

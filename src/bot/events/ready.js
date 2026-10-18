@@ -3,10 +3,13 @@ const config = require('../../config');
 const logger = require('../../logger');
 const { db } = require('../../database/db');
 const { getDueTempBans, markUnbanned } = require('../../database/tempbans');
-const { getExpiredGiveaways, getGiveaway, getPendingClaimGiveaways } = require('../../database/giveaways');
+const { getExpiredGiveaways, getPendingClaimGiveaways } = require('../../database/giveaways');
 const { endGiveaway, expireUnclaimedWinners } = require('../commands/giveaway');
 const { getSettings } = require('../../database/settings');
 const { addModAction } = require('../../database/modactions');
+
+// Discord error code: the user is not banned (already unbanned by hand).
+const UNKNOWN_BAN = 10026;
 
 async function registerCommands(client) {
   const commands = [...client.commands.values()].map(c => c.data.toJSON());
@@ -46,7 +49,7 @@ module.exports = {
       const guildIds = [...client.guilds.cache.keys()];
       const placeholders = guildIds.map(() => '?').join(',');
       const row = guildIds.length > 0
-        ? db.prepare(`SELECT bot_status_message FROM guild_settings WHERE guild_id IN (${placeholders}) AND bot_status_message IS NOT NULL LIMIT 1`).get(...guildIds)
+        ? await db.get(`SELECT bot_status_message FROM guild_settings WHERE guild_id IN (${placeholders}) AND bot_status_message IS NOT NULL LIMIT 1`, guildIds)
         : null;
       if (row && row.bot_status_message) {
         statusMessage = row.bot_status_message;
@@ -67,12 +70,14 @@ module.exports = {
     }
 
     // Start periodic temp ban expiry checker (every 60 seconds)
-    module.exports._tempBanInterval = setInterval(() => checkExpiredTempBans(client), 60 * 1000);
-    checkExpiredTempBans(client);
+    const tempBanSweep = sweeper('temp ban', () => checkExpiredTempBans(client));
+    module.exports._tempBanInterval = setInterval(tempBanSweep, 60 * 1000);
+    tempBanSweep();
 
     // Start periodic giveaway expiry checker (every 30 seconds)
-    module.exports._giveawayInterval = setInterval(() => checkExpiredGiveaways(client), 30 * 1000);
-    checkExpiredGiveaways(client);
+    const giveawaySweep = sweeper('giveaway', () => checkExpiredGiveaways(client));
+    module.exports._giveawayInterval = setInterval(giveawaySweep, 30 * 1000);
+    giveawaySweep();
 
   },
   cleanup() {
@@ -81,10 +86,28 @@ module.exports = {
   },
 };
 
+// Wraps an async sweep for setInterval: a run that is still going (slow
+// database or Discord API) is not started again, and a rejection is logged
+// instead of becoming an unhandled rejection.
+function sweeper(name, fn) {
+  let running = false;
+  return async () => {
+    if (running) return;
+    running = true;
+    try {
+      await fn();
+    } catch (err) {
+      logger.error(`Error in ${name} sweep: ${err.message}`);
+    } finally {
+      running = false;
+    }
+  };
+}
+
 async function checkExpiredTempBans(client) {
   let dueBans;
   try {
-    dueBans = getDueTempBans();
+    dueBans = await getDueTempBans();
   } catch (err) {
     logger.error(`Failed to fetch due temp bans: ${err.message}`);
     return;
@@ -95,27 +118,36 @@ async function checkExpiredTempBans(client) {
       const guild = client.guilds.cache.get(ban.guild_id);
       if (!guild) {
         logger.warn(`Temp ban expired but guild ${ban.guild_id} not found, marking as unbanned`);
-        markUnbanned(ban.id);
+        await markUnbanned(ban.id);
+        continue;
+      }
+      if (guild.available === false) {
+        // Discord outage: keep the ban and retry on the next sweep.
         continue;
       }
 
       try {
         await guild.bans.remove(ban.user_id, 'Temporary ban expired');
       } catch (err) {
-        // User may already be unbanned manually
-        logger.warn(`Failed to unban user ${ban.user_id} in guild ${ban.guild_id}: ${err.message}`);
+        if (err.code !== UNKNOWN_BAN) {
+          // Missing permission, rate limit, 5xx...: leave it due so the next
+          // sweep retries, instead of keeping the user banned for good.
+          logger.warn(`Failed to unban user ${ban.user_id} in guild ${ban.guild_id}, will retry: ${err.message}`);
+          continue;
+        }
+        // Already unbanned by hand
       }
 
-      markUnbanned(ban.id);
+      await markUnbanned(ban.id);
 
       try {
-        addModAction(ban.guild_id, client.user.id, 'unban', ban.user_id, 'Temporary ban expired');
+        await addModAction(ban.guild_id, client.user.id, 'unban', ban.user_id, 'Temporary ban expired');
       } catch (err) {
         logger.warn(`Failed to log temp unban mod action: ${err.message}`);
       }
 
       // Log to ban log channel
-      const settings = getSettings(ban.guild_id);
+      const settings = await getSettings(ban.guild_id);
       if (settings && settings.ban_log_channel_id) {
         try {
           const logChannel = await guild.channels.fetch(settings.ban_log_channel_id);
@@ -147,7 +179,7 @@ async function checkExpiredTempBans(client) {
 async function checkExpiredGiveaways(client) {
   let expired;
   try {
-    expired = getExpiredGiveaways();
+    expired = await getExpiredGiveaways();
   } catch (err) {
     logger.error(`Failed to fetch expired giveaways: ${err.message}`);
     return;
@@ -155,8 +187,10 @@ async function checkExpiredGiveaways(client) {
 
   for (const giveaway of expired) {
     try {
-      await endGiveaway(client, giveaway);
-      logger.info(`Giveaway ${giveaway.id} auto-ended: prize=${giveaway.prize} guild=${giveaway.guild_id}`);
+      const winners = await endGiveaway(client, giveaway);
+      if (winners) {
+        logger.info(`Giveaway ${giveaway.id} auto-ended: prize=${giveaway.prize} guild=${giveaway.guild_id} winners=${winners.length}`);
+      }
     } catch (err) {
       logger.error(`Error processing expired giveaway ${giveaway.id}: ${err.message}`);
     }
@@ -165,7 +199,7 @@ async function checkExpiredGiveaways(client) {
   // Invalidate winners who did not claim inside their claim window and reroll
   let pendingClaims;
   try {
-    pendingClaims = getPendingClaimGiveaways();
+    pendingClaims = await getPendingClaimGiveaways();
   } catch (err) {
     logger.error(`Failed to fetch expired giveaway claims: ${err.message}`);
     return;

@@ -18,35 +18,36 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!isModerator(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
 
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const targetUser = interaction.options.getUser('user');
     const input = interaction.options.getString('number').trim().toLowerCase();
     const guildId = interaction.guild.id;
 
-    const warnings = getWarnings(guildId, targetUser.id);
+    const warnings = await getWarnings(guildId, targetUser.id);
 
     if (warnings.length === 0) {
-      return interaction.reply({ content: `<@${targetUser.id}> has no warnings to remove.`, flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: `<@${targetUser.id}> has no warnings to remove.` });
     }
 
     // --- Clear all ---
     if (input === 'all') {
-      clearUserWarnings(guildId, targetUser.id);
+      await clearUserWarnings(guildId, targetUser.id);
 
       try {
-        addModAction(guildId, interaction.user.id, 'clear_all_warnings', targetUser.id, `Cleared ${warnings.length} warning(s)`);
+        await addModAction(guildId, interaction.user.id, 'clear_all_warnings', targetUser.id, `Cleared ${warnings.length} warning(s)`);
       } catch (err) {
         logger.warn(`Failed to log mod action: ${err.message}`);
       }
 
-      await interaction.reply({
+      await interaction.editReply({
         content: `Cleared all **${warnings.length}** warning(s) from <@${targetUser.id}>.`,
-        flags: MessageFlags.Ephemeral,
       });
 
       if (settings.warn_log_channel_id) {
@@ -74,31 +75,28 @@ module.exports = {
     // --- Clear specific ---
     const number = parseInt(input, 10);
     if (isNaN(number) || number < 1) {
-      return interaction.reply({
+      return interaction.editReply({
         content: 'Please provide a valid warning number (e.g. `1`) or `all`.',
-        flags: MessageFlags.Ephemeral,
       });
     }
 
     if (number > warnings.length) {
-      return interaction.reply({
+      return interaction.editReply({
         content: `<@${targetUser.id}> only has **${warnings.length}** warning(s). Please provide a number between 1 and ${warnings.length}, or \`all\`.`,
-        flags: MessageFlags.Ephemeral,
       });
     }
 
     const warning = warnings[number - 1]; // warnings are ASC by created_at, so #1 = oldest
-    deleteWarning(warning.id, guildId);
+    await deleteWarning(warning.id, guildId);
 
     try {
-      addModAction(guildId, interaction.user.id, 'clear_warning', targetUser.id, `Removed warning #${number}: ${warning.reason}`);
+      await addModAction(guildId, interaction.user.id, 'clear_warning', targetUser.id, `Removed warning #${number}: ${warning.reason}`);
     } catch (err) {
       logger.warn(`Failed to log mod action: ${err.message}`);
     }
 
-    await interaction.reply({
+    await interaction.editReply({
       content: `Removed warning #${number} from <@${targetUser.id}>.\n**Reason was:** ${warning.reason}`,
-      flags: MessageFlags.Ephemeral,
     });
 
     if (settings.warn_log_channel_id) {

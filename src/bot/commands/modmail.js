@@ -34,7 +34,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!isModerator(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
@@ -46,8 +46,9 @@ module.exports = {
       const category = interaction.options.getChannel('category');
       const enabled = interaction.options.getBoolean('enabled');
 
-      updateSetting(interaction.guild.id, 'modmail_category_id', category.id);
-      updateSetting(interaction.guild.id, 'modmail_enabled', enabled ? 1 : 0);
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateSetting(interaction.guild.id, 'modmail_category_id', category.id);
+      await updateSetting(interaction.guild.id, 'modmail_enabled', enabled ? 1 : 0);
 
       const embed = new EmbedBuilder()
         .setTitle('Modmail Configuration Updated')
@@ -58,15 +59,19 @@ module.exports = {
         )
         .setTimestamp();
 
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ embeds: [embed] });
     }
 
     if (subcommand === 'close') {
-      const thread = getOpenThreadByChannel(interaction.channel.id);
+      const thread = await getOpenThreadByChannel(interaction.channel.id);
 
       if (!thread) {
         return interaction.reply({ content: 'This channel is not an active modmail thread.', flags: MessageFlags.Ephemeral });
       }
+
+      // The closing notice is public; acknowledge now, before the DM and the
+      // database write, so a slow call can't time the interaction out.
+      await interaction.deferReply();
 
       try {
         // Notify the user
@@ -86,9 +91,9 @@ module.exports = {
         }
 
         // Close in database
-        closeThread(thread.id, interaction.user.id);
+        await closeThread(thread.id, interaction.user.id);
 
-        await interaction.reply({
+        await interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setTitle('Thread Closed')
@@ -110,13 +115,13 @@ module.exports = {
         logger.info(`Modmail thread closed via command: channel=${interaction.channel.id} closedBy=${interaction.user.username}`);
       } catch (err) {
         logger.error(`Failed to close modmail thread: ${err.message}`);
-        return interaction.reply({ content: `Failed to close thread: ${err.message}`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `Failed to close thread: ${err.message}` });
       }
       return;
     }
 
     if (subcommand === 'threads') {
-      const threads = getAllOpenThreads(interaction.guild.id);
+      const threads = await getAllOpenThreads(interaction.guild.id);
 
       if (threads.length === 0) {
         return interaction.reply({ content: 'No open modmail threads.', flags: MessageFlags.Ephemeral });

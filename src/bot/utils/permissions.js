@@ -71,4 +71,23 @@ function canViewBanReason(member, settings) {
   return false;
 }
 
-module.exports = { isExempt, isModerator, canWarn, canBan, canViewModActions, canViewBanReason };
+// A self-role button gives its role to anyone who clicks it, so roles carrying
+// any of these permissions must never be handed out that way.
+const SELF_ROLE_FORBIDDEN_PERMISSIONS = [
+  PermissionFlagsBits.Administrator,
+  PermissionFlagsBits.ManageGuild,
+  PermissionFlagsBits.ManageRoles,
+  PermissionFlagsBits.ManageChannels,
+  PermissionFlagsBits.BanMembers,
+  PermissionFlagsBits.KickMembers,
+  PermissionFlagsBits.ManageWebhooks,
+  PermissionFlagsBits.ModerateMembers,
+  PermissionFlagsBits.MentionEveryone,
+  PermissionFlagsBits.ManageMessages,
+];
+
+function isUnsafeSelfRole(role) {
+  return SELF_ROLE_FORBIDDEN_PERMISSIONS.some(permission => role.permissions.has(permission));
+}
+
+module.exports = { isExempt, isModerator, canWarn, canBan, canViewModActions, canViewBanReason, isUnsafeSelfRole };

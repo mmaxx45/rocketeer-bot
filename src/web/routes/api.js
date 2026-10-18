@@ -1,11 +1,50 @@
-const express = require('express');
-const { ActivityType } = require('discord.js');
+const { ActivityType, PermissionFlagsBits } = require('discord.js');
+const { asyncRouter } = require('../asyncHandler');
+const { isUnsafeSelfRole } = require('../../bot/utils/permissions');
 const { getSettings, updateSetting, addExemptChannel, removeExemptChannel, getExemptChannels, getBannedDomains, addBannedDomain, removeBannedDomain, getImageOnlyChannels, addImageOnlyChannel, removeImageOnlyChannel, getGiveawayHostUsers, addGiveawayHostUser, removeGiveawayHostUser } = require('../../database/settings');
 const { getAllGuildWarnings, deleteWarning, clearUserWarnings } = require('../../database/warnings');
 const { db } = require('../../database/db');
 const logger = require('../../logger');
 const { userCanManageGuild } = require('../middleware/auth');
-const { addFilterWord, removeFilterWord, removeFilterWordById, getFilterWords, addWhitelistWord, removeWhitelistWord, getWhitelist } = require('../../database/wordFilter');
+const { addFilterWord, toggleWholeWord, removeFilterWordById, getFilterWords, getFilterViolations, addWhitelistWord, removeWhitelistWord, getWhitelist } = require('../../database/wordFilter');
+const { getAppeals } = require('../../database/appeals');
+
+const SNOWFLAKE = /^\d{17,20}$/;
+
+function isSnowflake(value) {
+  return typeof value === 'string' && SNOWFLAKE.test(value);
+}
+
+// Row ids from the URL: a positive integer that fits a Postgres INTEGER.
+// Anything else would make Postgres raise instead of matching nothing.
+function parseRowId(value) {
+  if (typeof value !== 'string' || !/^\d{1,10}$/.test(value)) return null;
+  const id = Number(value);
+  return id >= 1 && id <= 2147483647 ? id : null;
+}
+
+function isOptionalString(value) {
+  return value === undefined || value === null || typeof value === 'string';
+}
+
+const MAX_GIVEAWAY_WINNERS = 25;
+
+function clampWinnerCount(value) {
+  const count = parseInt(value, 10);
+  if (!Number.isFinite(count)) return 1;
+  return Math.min(MAX_GIVEAWAY_WINNERS, Math.max(1, count));
+}
+
+// Returns an error message for the giveaway text fields of a request, or null.
+function giveawayFieldProblem(fields) {
+  const limits = { title: 256, prize: 256, description: 4000, color: 16, duration: 32, claimTime: 32 };
+  for (const [name, max] of Object.entries(limits)) {
+    const value = fields[name];
+    if (!isOptionalString(value)) return `${name} must be text`;
+    if (value && value.length > max) return `${name} must be at most ${max} characters`;
+  }
+  return null;
+}
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) return next();
@@ -20,7 +59,7 @@ function ensureGuildAccess(req, res, next) {
 }
 
 function ensureGiveawayAccess(client) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const guildId = req.params.guildId;
     // Admins always have access
     if (userCanManageGuild(req.user, guildId)) return next();
@@ -30,9 +69,15 @@ function ensureGiveawayAccess(client) {
     const userGuild = (user.guilds || []).find(g => g.id === guildId);
     if (!userGuild) return res.status(403).json({ error: 'Forbidden' });
 
-    const settings = getSettings(guildId);
-    const { getGiveawayHostUsers } = require('../../database/settings');
-    const hostUsers = getGiveawayHostUsers(guildId);
+    let settings;
+    let hostUsers;
+    try {
+      settings = await getSettings(guildId);
+      hostUsers = await getGiveawayHostUsers(guildId);
+    } catch (err) {
+      logger.error('Failed to check giveaway access:', err);
+      return res.status(500).json({ error: 'Failed to check giveaway access' });
+    }
     if (hostUsers.includes(user.id)) return next();
 
     if (settings.giveaway_host_role_id) {
@@ -47,24 +92,74 @@ function ensureGiveawayAccess(client) {
   };
 }
 
+// Settings fields holding a Discord role/channel id ('' or null clears them).
+const SETTINGS_ID_FIELDS = [
+  'moderator_role_id', 'warn_log_channel_id', 'ban_log_channel_id', 'warn_role_id', 'ban_role_id',
+  'modactions_role_id', 'banreason_role_id', 'modmail_category_id', 'appeal_category_id',
+  'giveaway_host_role_id', 'giveaway_log_channel_id', 'giveaway_ping_role_id', 'giveaway_channel_id',
+];
+
+// Settings fields holding free text ('' or null clears them).
+const SETTINGS_TEXT_FIELDS = [
+  'crosspost_first_message', 'crosspost_repeat_message', 'warn_public_message', 'blocked_extensions',
+  'custom_warn_reasons', 'bot_status_message', 'banned_domains', 'server_invite_code',
+];
+
+// image_only_channels arrives as an array or a JSON string of channel ids.
+function parseChannelList(value) {
+  let list = value;
+  if (typeof value === 'string') {
+    if (!value.trim()) return [];
+    try {
+      list = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (value === null) return [];
+  if (!Array.isArray(list) || !list.every(isSnowflake)) return null;
+  return [...new Set(list)];
+}
+
 module.exports = function (client) {
-  const router = express.Router();
+  const router = asyncRouter();
   router.use(ensureAuthenticated);
 
   // Update guild settings
-  router.post('/guild/:guildId/settings', ensureGuildAccess, (req, res) => {
+  router.post('/guild/:guildId/settings', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
-    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code, giveaway_host_role_id, giveaway_log_channel_id, giveaway_ping_role_id, giveaway_channel_id } = req.body;
+    const body = { ...req.body };
+    for (const field of SETTINGS_ID_FIELDS) {
+      const value = body[field];
+      if (value !== undefined && value !== null && value !== '' && !isSnowflake(value)) {
+        return res.status(400).json({ error: `${field} must be a Discord ID` });
+      }
+    }
+    for (const field of SETTINGS_TEXT_FIELDS) {
+      if (!isOptionalString(body[field])) {
+        return res.status(400).json({ error: `${field} must be text` });
+      }
+      if (body[field] === null) body[field] = '';
+    }
+    const { moderator_role_id, crosspost_threshold, crosspost_detection_seconds, crosspost_window_hours, warning_threshold, warn_log_channel_id, ban_log_channel_id, warn_role_id, ban_role_id, modactions_role_id, banreason_role_id, crosspost_first_message, crosspost_repeat_message, warn_public_message, crosspost_kick_count, crosspost_kick_window_minutes, modmail_enabled, modmail_category_id, file_block_enabled, blocked_extensions, custom_warn_reasons, bot_status_message, banned_domains, filter_enabled, soft_slur_threshold, soft_slur_window_minutes, image_only_channels, appeal_category_id, appeal_enabled, server_invite_code, giveaway_host_role_id, giveaway_log_channel_id, giveaway_ping_role_id, giveaway_channel_id } = body;
+
+    let imageOnlyChannels;
+    if (image_only_channels !== undefined) {
+      imageOnlyChannels = parseChannelList(image_only_channels);
+      if (!imageOnlyChannels) {
+        return res.status(400).json({ error: 'image_only_channels must be a list of channel IDs' });
+      }
+    }
 
     try {
       const warnings = [];
       if (moderator_role_id !== undefined) {
-        updateSetting(guildId, 'moderator_role_id', moderator_role_id || null);
+        await updateSetting(guildId, 'moderator_role_id', moderator_role_id || null);
       }
       if (crosspost_threshold !== undefined) {
         const val = parseInt(crosspost_threshold);
         if (val >= 1 && val <= 100) {
-          updateSetting(guildId, 'crosspost_threshold', val);
+          await updateSetting(guildId, 'crosspost_threshold', val);
         } else {
           warnings.push('Crosspost threshold must be between 1 and 100');
         }
@@ -72,7 +167,7 @@ module.exports = function (client) {
       if (crosspost_detection_seconds !== undefined) {
         const val = parseInt(crosspost_detection_seconds);
         if (val >= 5 && val <= 300) {
-          updateSetting(guildId, 'crosspost_detection_seconds', val);
+          await updateSetting(guildId, 'crosspost_detection_seconds', val);
         } else {
           warnings.push('Detection seconds must be between 5 and 300');
         }
@@ -80,7 +175,7 @@ module.exports = function (client) {
       if (crosspost_window_hours !== undefined) {
         const val = parseInt(crosspost_window_hours);
         if (val >= 1 && val <= 168) {
-          updateSetting(guildId, 'crosspost_window_hours', val);
+          await updateSetting(guildId, 'crosspost_window_hours', val);
         } else {
           warnings.push('Window hours must be between 1 and 168');
         }
@@ -88,79 +183,79 @@ module.exports = function (client) {
       if (warning_threshold !== undefined) {
         const val = parseInt(warning_threshold);
         if (val >= 1 && val <= 50) {
-          updateSetting(guildId, 'warning_threshold', val);
+          await updateSetting(guildId, 'warning_threshold', val);
         } else {
           warnings.push('Warning threshold must be between 1 and 50');
         }
       }
       if (warn_log_channel_id !== undefined) {
-        updateSetting(guildId, 'warn_log_channel_id', warn_log_channel_id || null);
+        await updateSetting(guildId, 'warn_log_channel_id', warn_log_channel_id || null);
       }
       if (ban_log_channel_id !== undefined) {
-        updateSetting(guildId, 'ban_log_channel_id', ban_log_channel_id || null);
+        await updateSetting(guildId, 'ban_log_channel_id', ban_log_channel_id || null);
       }
       if (warn_role_id !== undefined) {
-        updateSetting(guildId, 'warn_role_id', warn_role_id || null);
+        await updateSetting(guildId, 'warn_role_id', warn_role_id || null);
       }
       if (ban_role_id !== undefined) {
-        updateSetting(guildId, 'ban_role_id', ban_role_id || null);
+        await updateSetting(guildId, 'ban_role_id', ban_role_id || null);
       }
       if (modactions_role_id !== undefined) {
-        updateSetting(guildId, 'modactions_role_id', modactions_role_id || null);
+        await updateSetting(guildId, 'modactions_role_id', modactions_role_id || null);
       }
       if (banreason_role_id !== undefined) {
-        updateSetting(guildId, 'banreason_role_id', banreason_role_id || null);
+        await updateSetting(guildId, 'banreason_role_id', banreason_role_id || null);
       }
       if (crosspost_first_message !== undefined) {
-        updateSetting(guildId, 'crosspost_first_message', crosspost_first_message.trim() || null);
+        await updateSetting(guildId, 'crosspost_first_message', crosspost_first_message.trim() || null);
       }
       if (crosspost_repeat_message !== undefined) {
-        updateSetting(guildId, 'crosspost_repeat_message', crosspost_repeat_message.trim() || null);
+        await updateSetting(guildId, 'crosspost_repeat_message', crosspost_repeat_message.trim() || null);
       }
       if (warn_public_message !== undefined) {
-        updateSetting(guildId, 'warn_public_message', warn_public_message.trim() || null);
+        await updateSetting(guildId, 'warn_public_message', warn_public_message.trim() || null);
       }
       if (crosspost_kick_count !== undefined) {
         const val = parseInt(crosspost_kick_count);
         if (val >= 1 && val <= 50) {
-          updateSetting(guildId, 'crosspost_kick_count', val);
+          await updateSetting(guildId, 'crosspost_kick_count', val);
         }
       }
       if (crosspost_kick_window_minutes !== undefined) {
         const val = parseInt(crosspost_kick_window_minutes);
         if (val >= 1 && val <= 10080) {
-          updateSetting(guildId, 'crosspost_kick_window_minutes', val);
+          await updateSetting(guildId, 'crosspost_kick_window_minutes', val);
         }
       }
       if (modmail_enabled !== undefined) {
-        updateSetting(guildId, 'modmail_enabled', modmail_enabled === 'on' || modmail_enabled === true || modmail_enabled === '1' ? 1 : 0);
+        await updateSetting(guildId, 'modmail_enabled', modmail_enabled === 'on' || modmail_enabled === true || modmail_enabled === '1' ? 1 : 0);
       }
       if (modmail_category_id !== undefined) {
-        updateSetting(guildId, 'modmail_category_id', modmail_category_id || null);
+        await updateSetting(guildId, 'modmail_category_id', modmail_category_id || null);
       }
       if (file_block_enabled !== undefined) {
-        updateSetting(guildId, 'file_block_enabled', file_block_enabled === 'on' || file_block_enabled === '1' || file_block_enabled === true ? 1 : 0);
+        await updateSetting(guildId, 'file_block_enabled', file_block_enabled === 'on' || file_block_enabled === '1' || file_block_enabled === true ? 1 : 0);
       }
       if (blocked_extensions !== undefined) {
         const raw = blocked_extensions.trim();
         if (!raw) {
-          updateSetting(guildId, 'blocked_extensions', null);
+          await updateSetting(guildId, 'blocked_extensions', null);
         } else {
           const parsed = raw.split(/[,\s]+/).map(ext => ext.toLowerCase().replace(/^\./, '').trim()).filter(Boolean);
-          updateSetting(guildId, 'blocked_extensions', JSON.stringify(parsed));
+          await updateSetting(guildId, 'blocked_extensions', JSON.stringify(parsed));
         }
       }
       if (custom_warn_reasons !== undefined) {
         const lines = custom_warn_reasons.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         if (lines.length > 0) {
-          updateSetting(guildId, 'custom_warn_reasons', JSON.stringify(lines));
+          await updateSetting(guildId, 'custom_warn_reasons', JSON.stringify(lines));
         } else {
-          updateSetting(guildId, 'custom_warn_reasons', null);
+          await updateSetting(guildId, 'custom_warn_reasons', null);
         }
       }
       if (bot_status_message !== undefined) {
         const msg = bot_status_message.trim() || null;
-        updateSetting(guildId, 'bot_status_message', msg);
+        await updateSetting(guildId, 'bot_status_message', msg);
         // Note: bot presence is global — last guild to save controls the status for all guilds
         try {
           if (msg) {
@@ -179,37 +274,35 @@ module.exports = function (client) {
       if (banned_domains !== undefined) {
         const raw = banned_domains.trim();
         if (!raw) {
-          updateSetting(guildId, 'banned_domains', null);
+          await updateSetting(guildId, 'banned_domains', null);
         } else {
           const parsed = raw.split(/[,\s]+/).map(d => d.toLowerCase().trim()).filter(Boolean);
-          updateSetting(guildId, 'banned_domains', JSON.stringify(parsed));
+          await updateSetting(guildId, 'banned_domains', JSON.stringify(parsed));
         }
       }
       if (filter_enabled !== undefined) {
-        updateSetting(guildId, 'filter_enabled', filter_enabled === 'on' || filter_enabled === '1' || filter_enabled === true ? 1 : 0);
+        await updateSetting(guildId, 'filter_enabled', filter_enabled === 'on' || filter_enabled === '1' || filter_enabled === true ? 1 : 0);
       }
       if (soft_slur_threshold !== undefined) {
         const val = parseInt(soft_slur_threshold);
         if (val >= 1 && val <= 50) {
-          updateSetting(guildId, 'soft_slur_threshold', val);
+          await updateSetting(guildId, 'soft_slur_threshold', val);
         }
       }
       if (soft_slur_window_minutes !== undefined) {
         const val = parseInt(soft_slur_window_minutes);
         if (val >= 1 && val <= 10080) {
-          updateSetting(guildId, 'soft_slur_window_minutes', val);
+          await updateSetting(guildId, 'soft_slur_window_minutes', val);
         }
       }
-      if (image_only_channels !== undefined) {
-        // Accepts JSON string or array
-        const channelsStr = typeof image_only_channels === 'string' ? image_only_channels : JSON.stringify(image_only_channels);
-        updateSetting(guildId, 'image_only_channels', channelsStr || null);
+      if (imageOnlyChannels !== undefined) {
+        await updateSetting(guildId, 'image_only_channels', imageOnlyChannels.length > 0 ? JSON.stringify(imageOnlyChannels) : null);
       }
       if (appeal_category_id !== undefined) {
-        updateSetting(guildId, 'appeal_category_id', appeal_category_id || null);
+        await updateSetting(guildId, 'appeal_category_id', appeal_category_id || null);
       }
       if (appeal_enabled !== undefined) {
-        updateSetting(guildId, 'appeal_enabled', appeal_enabled === 'on' || appeal_enabled === true || appeal_enabled === '1' ? 1 : 0);
+        await updateSetting(guildId, 'appeal_enabled', appeal_enabled === 'on' || appeal_enabled === true || appeal_enabled === '1' ? 1 : 0);
       }
       if (server_invite_code !== undefined) {
         // Strip full URL if provided, just store the code
@@ -217,22 +310,22 @@ module.exports = function (client) {
         if (code.includes('discord.gg/')) {
           code = code.split('discord.gg/').pop().split(/[?\s]/)[0];
         }
-        updateSetting(guildId, 'server_invite_code', code || null);
+        await updateSetting(guildId, 'server_invite_code', code || null);
       }
       if (giveaway_host_role_id !== undefined) {
-        updateSetting(guildId, 'giveaway_host_role_id', giveaway_host_role_id || null);
+        await updateSetting(guildId, 'giveaway_host_role_id', giveaway_host_role_id || null);
       }
       if (giveaway_log_channel_id !== undefined) {
-        updateSetting(guildId, 'giveaway_log_channel_id', giveaway_log_channel_id || null);
+        await updateSetting(guildId, 'giveaway_log_channel_id', giveaway_log_channel_id || null);
       }
       if (giveaway_ping_role_id !== undefined) {
-        updateSetting(guildId, 'giveaway_ping_role_id', giveaway_ping_role_id || null);
+        await updateSetting(guildId, 'giveaway_ping_role_id', giveaway_ping_role_id || null);
       }
       if (giveaway_channel_id !== undefined) {
-        updateSetting(guildId, 'giveaway_channel_id', giveaway_channel_id || null);
+        await updateSetting(guildId, 'giveaway_channel_id', giveaway_channel_id || null);
       }
 
-      const settings = getSettings(guildId);
+      const settings = await getSettings(guildId);
       res.json({ success: true, settings, warnings: warnings.length > 0 ? warnings : undefined });
     } catch (err) {
       logger.error('Failed to update settings:', err);
@@ -241,16 +334,17 @@ module.exports = function (client) {
   });
 
   // Update exempt channels
-  router.post('/guild/:guildId/exempt-channels', ensureGuildAccess, (req, res) => {
+  router.post('/guild/:guildId/exempt-channels', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { channelId, action } = req.body;
+    if (!isSnowflake(channelId)) return res.status(400).json({ error: 'channelId must be a Discord ID' });
 
     try {
       let channels;
       if (action === 'add') {
-        channels = addExemptChannel(guildId, channelId);
+        channels = await addExemptChannel(guildId, channelId);
       } else if (action === 'remove') {
-        channels = removeExemptChannel(guildId, channelId);
+        channels = await removeExemptChannel(guildId, channelId);
       } else {
         return res.status(400).json({ error: 'Invalid action' });
       }
@@ -262,16 +356,17 @@ module.exports = function (client) {
   });
 
   // Update image-only channels
-  router.post('/guild/:guildId/image-only-channels', ensureGuildAccess, (req, res) => {
+  router.post('/guild/:guildId/image-only-channels', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { channelId, action } = req.body;
+    if (!isSnowflake(channelId)) return res.status(400).json({ error: 'channelId must be a Discord ID' });
 
     try {
       let channels;
       if (action === 'add') {
-        channels = addImageOnlyChannel(guildId, channelId);
+        channels = await addImageOnlyChannel(guildId, channelId);
       } else if (action === 'remove') {
-        channels = removeImageOnlyChannel(guildId, channelId);
+        channels = await removeImageOnlyChannel(guildId, channelId);
       } else {
         return res.status(400).json({ error: 'Invalid action' });
       }
@@ -284,21 +379,27 @@ module.exports = function (client) {
 
 
   // Get warnings
-  router.get('/guild/:guildId/warnings', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/warnings', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = 25;
     const offset = (page - 1) * limit;
 
-    const { rows, total } = getAllGuildWarnings(guildId, limit, offset);
-    res.json({ warnings: rows, total, page, totalPages: Math.ceil(total / limit) });
+    try {
+      const { rows, total } = await getAllGuildWarnings(guildId, limit, offset);
+      res.json({ warnings: rows, total, page, totalPages: Math.ceil(total / limit) });
+    } catch (err) {
+      logger.error('Failed to fetch warnings:', err);
+      res.status(500).json({ error: 'Failed to fetch warnings' });
+    }
   });
 
   // Clear all warnings for a user (must be before :warningId to avoid shadowing)
-  router.delete('/guild/:guildId/warnings/user/:userId', ensureGuildAccess, (req, res) => {
+  router.delete('/guild/:guildId/warnings/user/:userId', ensureGuildAccess, async (req, res) => {
     const { guildId, userId } = req.params;
+    if (!isSnowflake(userId)) return res.status(400).json({ error: 'userId must be a Discord ID' });
     try {
-      clearUserWarnings(guildId, userId);
+      await clearUserWarnings(guildId, userId);
       res.json({ success: true });
     } catch (err) {
       logger.error('Failed to clear user warnings:', err);
@@ -307,10 +408,12 @@ module.exports = function (client) {
   });
 
   // Delete a warning
-  router.delete('/guild/:guildId/warnings/:warningId', ensureGuildAccess, (req, res) => {
-    const { guildId, warningId } = req.params;
+  router.delete('/guild/:guildId/warnings/:warningId', ensureGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const warningId = parseRowId(req.params.warningId);
+    if (!warningId) return res.status(404).json({ error: 'Warning not found' });
     try {
-      deleteWarning(warningId, guildId);
+      await deleteWarning(warningId, guildId);
       res.json({ success: true });
     } catch (err) {
       logger.error('Failed to delete warning:', err);
@@ -319,38 +422,38 @@ module.exports = function (client) {
   });
 
   // Get guild stats
-  router.get('/guild/:guildId/stats', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/stats', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
     try {
-      const totalWarnings = db.prepare('SELECT COUNT(*) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
-      const totalBans = db.prepare("SELECT COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND action_type = 'ban'").get(guildId).count;
-      const totalCrosspostIncidents = db.prepare('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?').get(guildId).count;
+      const totalWarnings = (await db.get('SELECT COUNT(*) as count FROM warnings WHERE guild_id = ?', [guildId])).count;
+      const totalBans = (await db.get("SELECT COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND action_type = 'ban'", [guildId])).count;
+      const totalCrosspostIncidents = (await db.get('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?', [guildId])).count;
       const botId = client.user.id;
-      const activeMods = db.prepare(`
+      const activeMods = (await db.get(`
         SELECT COUNT(DISTINCT moderator_id) as count FROM mod_actions
         WHERE guild_id = ? AND moderator_id != ? AND created_at >= datetime('now', '-30 days')
-      `).get(guildId, botId).count;
+      `, [guildId, botId])).count;
 
-      const mostWarnedUsers = db.prepare(`
+      const mostWarnedUsers = await db.all(`
         SELECT user_id, COUNT(*) as count FROM warnings
         WHERE guild_id = ? GROUP BY user_id ORDER BY count DESC LIMIT 10
-      `).all(guildId);
+      `, [guildId]);
 
-      const mostActiveMods = db.prepare(`
+      const mostActiveMods = await db.all(`
         SELECT moderator_id, COUNT(*) as count FROM mod_actions
         WHERE guild_id = ?
         GROUP BY moderator_id ORDER BY count DESC LIMIT 10
-      `).all(guildId);
+      `, [guildId]);
 
-      const warningReasons = db.prepare(`
+      const warningReasons = await db.all(`
         SELECT reason, COUNT(*) as count FROM warnings
         WHERE guild_id = ? GROUP BY reason ORDER BY count DESC LIMIT 15
-      `).all(guildId);
+      `, [guildId]);
 
-      const recentActivity = db.prepare(`
-        SELECT * FROM mod_actions WHERE guild_id = ? ORDER BY created_at DESC LIMIT 10
-      `).all(guildId);
+      const recentActivity = await db.all(`
+        SELECT * FROM mod_actions WHERE guild_id = ? ORDER BY created_at DESC, id DESC LIMIT 10
+      `, [guildId]);
 
       res.json({
         totalWarnings,
@@ -369,26 +472,25 @@ module.exports = function (client) {
   });
 
   // --- Stats detail endpoints ---
-  // NOTE: These detail routes use inline db.prepare() rather than module-level
-  // cached statements. This is intentional — they are read-infrequently
-  // (on-demand modal views) so the overhead is negligible, and keeping the
+  // NOTE: These detail routes keep their SQL inline rather than in a database
+  // module. They are read infrequently (on-demand modal views) and keeping the
   // queries co-located with each handler improves readability.
 
   // Warnings detail breakdown
-  router.get('/guild/:guildId/stats/warnings-detail', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/stats/warnings-detail', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-      const byType = db.prepare(`
+      const byType = await db.all(`
         SELECT type, COUNT(*) as count FROM warnings WHERE guild_id = ? GROUP BY type
-      `).all(guildId);
-      const byMonth = db.prepare(`
+      `, [guildId]);
+      const byMonth = await db.all(`
         SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count
         FROM warnings WHERE guild_id = ?
         GROUP BY month ORDER BY month DESC LIMIT 12
-      `).all(guildId);
-      const recent = db.prepare(`
-        SELECT * FROM warnings WHERE guild_id = ? ORDER BY created_at DESC LIMIT 20
-      `).all(guildId);
+      `, [guildId]);
+      const recent = await db.all(`
+        SELECT * FROM warnings WHERE guild_id = ? ORDER BY created_at DESC, id DESC LIMIT 20
+      `, [guildId]);
       res.json({ byType, byMonth, recent });
     } catch (err) {
       logger.error('Failed to fetch warnings detail:', err);
@@ -397,14 +499,14 @@ module.exports = function (client) {
   });
 
   // Bans detail list
-  router.get('/guild/:guildId/stats/bans', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/stats/bans', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-      const bans = db.prepare(`
+      const bans = await db.all(`
         SELECT * FROM mod_actions
         WHERE guild_id = ? AND action_type = 'ban'
-        ORDER BY created_at DESC LIMIT 50
-      `).all(guildId);
+        ORDER BY created_at DESC, id DESC LIMIT 50
+      `, [guildId]);
       res.json({ bans });
     } catch (err) {
       logger.error('Failed to fetch bans detail:', err);
@@ -413,20 +515,20 @@ module.exports = function (client) {
   });
 
   // Crosspost incidents detail
-  router.get('/guild/:guildId/stats/crosspost-detail', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/stats/crosspost-detail', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-      const byAction = db.prepare(`
+      const byAction = await db.all(`
         SELECT action_taken, COUNT(*) as count FROM crosspost_incidents
         WHERE guild_id = ? GROUP BY action_taken
-      `).all(guildId);
-      const topOffenders = db.prepare(`
+      `, [guildId]);
+      const topOffenders = await db.all(`
         SELECT user_id, COUNT(*) as count FROM crosspost_incidents
         WHERE guild_id = ? GROUP BY user_id ORDER BY count DESC LIMIT 10
-      `).all(guildId);
-      const recent = db.prepare(`
-        SELECT * FROM crosspost_incidents WHERE guild_id = ? ORDER BY created_at DESC LIMIT 20
-      `).all(guildId);
+      `, [guildId]);
+      const recent = await db.all(`
+        SELECT * FROM crosspost_incidents WHERE guild_id = ? ORDER BY created_at DESC, id DESC LIMIT 20
+      `, [guildId]);
       res.json({ byAction, topOffenders, recent });
     } catch (err) {
       logger.error('Failed to fetch crosspost detail:', err);
@@ -435,14 +537,14 @@ module.exports = function (client) {
   });
 
   // Active moderators detail
-  router.get('/guild/:guildId/stats/mods-detail', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/stats/mods-detail', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-      const mods = db.prepare(`
+      const mods = await db.all(`
         SELECT moderator_id, action_type, COUNT(*) as count
         FROM mod_actions WHERE guild_id = ? AND created_at >= datetime('now', '-30 days')
         GROUP BY moderator_id, action_type ORDER BY count DESC
-      `).all(guildId);
+      `, [guildId]);
       res.json({ mods });
     } catch (err) {
       logger.error('Failed to fetch mods detail:', err);
@@ -451,7 +553,7 @@ module.exports = function (client) {
   });
 
   // Get warnings over time (for chart)
-  router.get('/guild/:guildId/warnings-over-time', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/warnings-over-time', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const range = req.query.range || '8w';
 
@@ -468,17 +570,17 @@ module.exports = function (client) {
     const { buckets, bucketDays, labelFmt } = config;
 
     try {
-      const bucketStmt = db.prepare(`
+      const bucketSql = `
         SELECT COUNT(*) as count FROM warnings
         WHERE guild_id = ?
           AND created_at >= datetime('now', ? || ' days')
           AND created_at < datetime('now', ? || ' days')
-      `);
+      `;
       const data = [];
       for (let i = buckets - 1; i >= 0; i--) {
         const startDay = -(i + 1) * bucketDays;
         const endDay = -i * bucketDays;
-        const row = bucketStmt.get(guildId, String(startDay), String(endDay));
+        const row = await db.get(bucketSql, [guildId, String(startDay), String(endDay)]);
 
         const date = new Date();
         date.setDate(date.getDate() + startDay + bucketDays);
@@ -503,17 +605,15 @@ module.exports = function (client) {
   });
 
   // Get crosspost incidents
-  router.get('/guild/:guildId/incidents', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/incidents', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = 25;
     const offset = (page - 1) * limit;
 
     try {
-      const countStmt = db.prepare('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?');
-      const total = countStmt.get(guildId).count;
-      const rowsStmt = db.prepare('SELECT * FROM crosspost_incidents WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?');
-      const rows = rowsStmt.all(guildId, limit, offset);
+      const total = (await db.get('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?', [guildId])).count;
+      const rows = await db.all('SELECT * FROM crosspost_incidents WHERE guild_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?', [guildId, limit, offset]);
       res.json({ incidents: rows, total, page, totalPages: Math.ceil(total / limit) });
     } catch (err) {
       logger.error('Failed to fetch incidents:', err);
@@ -522,10 +622,10 @@ module.exports = function (client) {
   });
 
   // Get filter words
-  router.get('/guild/:guildId/filter-words', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/filter-words', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-      const words = getFilterWords(guildId);
+      const words = await getFilterWords(guildId);
       res.json({ words });
     } catch (err) {
       logger.error('Failed to fetch filter words:', err);
@@ -534,17 +634,17 @@ module.exports = function (client) {
   });
 
   // Add filter word
-  router.post('/guild/:guildId/filter-words', ensureGuildAccess, (req, res) => {
+  router.post('/guild/:guildId/filter-words', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { word, tier, wholeWord } = req.body;
 
-    if (!word || !tier || !['hard', 'soft', 'auto_delete'].includes(tier)) {
+    if (typeof word !== 'string' || !word.trim() || word.length > 100 || !['hard', 'soft', 'auto_delete'].includes(tier)) {
       return res.status(400).json({ error: 'Invalid word or tier' });
     }
 
     try {
-      addFilterWord(guildId, word.toLowerCase().trim(), tier, wholeWord ? 1 : 0);
-      const words = getFilterWords(guildId);
+      await addFilterWord(guildId, word.toLowerCase().trim(), tier, wholeWord ? 1 : 0);
+      const words = await getFilterWords(guildId);
       res.json({ success: true, words });
     } catch (err) {
       logger.error('Failed to add filter word:', err);
@@ -553,13 +653,14 @@ module.exports = function (client) {
   });
 
   // Toggle whole_word flag on filter word
-  router.patch('/guild/:guildId/filter-words/:wordId/whole-word', ensureGuildAccess, (req, res) => {
-    const { guildId, wordId } = req.params;
+  router.patch('/guild/:guildId/filter-words/:wordId/whole-word', ensureGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const wordId = parseRowId(req.params.wordId);
+    if (!wordId) return res.status(404).json({ error: 'Filter word not found' });
     const { wholeWord } = req.body;
     try {
-      const { toggleWholeWord } = require('../../database/wordFilter');
-      toggleWholeWord(guildId, parseInt(wordId, 10), wholeWord ? 1 : 0);
-      const words = getFilterWords(guildId);
+      await toggleWholeWord(guildId, wordId, wholeWord ? 1 : 0);
+      const words = await getFilterWords(guildId);
       res.json({ success: true, words });
     } catch (err) {
       logger.error('Failed to toggle whole_word:', err);
@@ -568,11 +669,13 @@ module.exports = function (client) {
   });
 
   // Remove filter word by ID
-  router.delete('/guild/:guildId/filter-words/:wordId', ensureGuildAccess, (req, res) => {
-    const { guildId, wordId } = req.params;
+  router.delete('/guild/:guildId/filter-words/:wordId', ensureGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const wordId = parseRowId(req.params.wordId);
+    if (!wordId) return res.status(404).json({ error: 'Filter word not found' });
     try {
-      removeFilterWordById(guildId, parseInt(wordId, 10));
-      const words = getFilterWords(guildId);
+      await removeFilterWordById(guildId, wordId);
+      const words = await getFilterWords(guildId);
       res.json({ success: true, words });
     } catch (err) {
       logger.error('Failed to remove filter word:', err);
@@ -582,10 +685,10 @@ module.exports = function (client) {
 
   // ========== Filter Whitelist ==========
 
-  router.get('/guild/:guildId/filter-whitelist', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/filter-whitelist', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-      const words = getWhitelist(guildId);
+      const words = await getWhitelist(guildId);
       res.json({ success: true, words });
     } catch (err) {
       logger.error('Failed to get filter whitelist:', err);
@@ -593,15 +696,15 @@ module.exports = function (client) {
     }
   });
 
-  router.post('/guild/:guildId/filter-whitelist', ensureGuildAccess, (req, res) => {
+  router.post('/guild/:guildId/filter-whitelist', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { word } = req.body;
-    if (!word || !word.trim()) {
+    if (typeof word !== 'string' || !word.trim() || word.length > 100) {
       return res.status(400).json({ error: 'Word is required' });
     }
     try {
-      addWhitelistWord(guildId, word.trim(), req.user ? req.user.id : null);
-      const words = getWhitelist(guildId);
+      await addWhitelistWord(guildId, word.trim(), req.user ? req.user.id : null);
+      const words = await getWhitelist(guildId);
       res.json({ success: true, words });
     } catch (err) {
       logger.error('Failed to add whitelist word:', err);
@@ -609,11 +712,11 @@ module.exports = function (client) {
     }
   });
 
-  router.delete('/guild/:guildId/filter-whitelist/:word', ensureGuildAccess, (req, res) => {
+  router.delete('/guild/:guildId/filter-whitelist/:word', ensureGuildAccess, async (req, res) => {
     const { guildId, word } = req.params;
     try {
-      removeWhitelistWord(guildId, decodeURIComponent(word));
-      const words = getWhitelist(guildId);
+      await removeWhitelistWord(guildId, word);
+      const words = await getWhitelist(guildId);
       res.json({ success: true, words });
     } catch (err) {
       logger.error('Failed to remove whitelist word:', err);
@@ -624,10 +727,10 @@ module.exports = function (client) {
   // ========== Banned Domains ==========
 
   // Get banned domains
-  router.get('/guild/:guildId/banned-domains', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/banned-domains', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-      const domains = getBannedDomains(guildId);
+      const domains = await getBannedDomains(guildId);
       res.json({ success: true, domains });
     } catch (err) {
       logger.error('Failed to get banned domains:', err);
@@ -636,7 +739,7 @@ module.exports = function (client) {
   });
 
   // Add or remove a banned domain
-  router.post('/guild/:guildId/banned-domains', ensureGuildAccess, (req, res) => {
+  router.post('/guild/:guildId/banned-domains', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { domain, action } = req.body;
 
@@ -647,9 +750,9 @@ module.exports = function (client) {
     try {
       let domains;
       if (action === 'add') {
-        domains = addBannedDomain(guildId, domain);
+        domains = await addBannedDomain(guildId, domain);
       } else if (action === 'remove') {
-        domains = removeBannedDomain(guildId, domain);
+        domains = await removeBannedDomain(guildId, domain);
       } else {
         return res.status(400).json({ error: 'Invalid action. Use "add" or "remove".' });
       }
@@ -663,13 +766,11 @@ module.exports = function (client) {
   // ========== Temp Bans ==========
 
   // Get active temp bans
-  router.get('/guild/:guildId/temp-bans', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/temp-bans', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
     try {
-      const tempBans = db.prepare(
-        'SELECT * FROM temp_bans WHERE guild_id = ? AND unbanned = 0 ORDER BY unban_at ASC'
-      ).all(guildId);
+      const tempBans = await db.all('SELECT * FROM temp_bans WHERE guild_id = ? AND unbanned = 0 ORDER BY unban_at ASC', [guildId]);
       res.json({ success: true, tempBans });
     } catch (err) {
       logger.error('Failed to fetch temp bans:', err);
@@ -679,21 +780,19 @@ module.exports = function (client) {
 
   // Cancel a temp ban early (manual unban)
   router.post('/guild/:guildId/temp-bans/:id/cancel', ensureGuildAccess, async (req, res) => {
-    const { guildId, id } = req.params;
+    const { guildId } = req.params;
+    const id = parseRowId(req.params.id);
+    if (!id) return res.status(404).json({ error: 'Temp ban not found or already cancelled' });
 
     try {
-      const tempBan = db.prepare(
-        'SELECT * FROM temp_bans WHERE id = ? AND guild_id = ? AND unbanned = 0'
-      ).get(id, guildId);
+      const tempBan = await db.get('SELECT * FROM temp_bans WHERE id = ? AND guild_id = ? AND unbanned = 0', [id, guildId]);
 
       if (!tempBan) {
         return res.status(404).json({ error: 'Temp ban not found or already cancelled' });
       }
 
       // Mark as unbanned in the database
-      db.prepare(
-        "UPDATE temp_bans SET unbanned = 1 WHERE id = ?"
-      ).run(id);
+      await db.run("UPDATE temp_bans SET unbanned = 1, unbanned_at = datetime('now') WHERE id = ?", [id]);
 
       // Try to unban the user from the guild
       try {
@@ -714,27 +813,50 @@ module.exports = function (client) {
 
   // ========== Self-Role Panels ==========
 
+  // A self-role button hands its role to anyone who clicks it, so the role has
+  // to be one the dashboard user could hand out themselves, and must not carry
+  // moderation or admin permissions. Returns an error message, or null.
+  async function checkSelfRole(guild, userId, roleId) {
+    const role = guild.roles.cache.get(roleId);
+    if (!role) return 'Role not found in this server';
+    if (role.id === guild.id) return 'The @everyone role cannot be a self-role';
+    if (role.managed) return 'Roles managed by an integration cannot be self-roles';
+    if (isUnsafeSelfRole(role)) {
+      return 'Roles with moderation or admin permissions cannot be self-roles';
+    }
+    const me = guild.members.me;
+    if (!me || role.position >= me.roles.highest.position) return "That role is not below the bot's highest role";
+    if (guild.ownerId !== userId) {
+      let member;
+      try {
+        member = await guild.members.fetch(userId);
+      } catch {
+        return 'Could not verify your roles in this server';
+      }
+      if (role.position >= member.roles.highest.position) return 'You can only add roles below your own highest role';
+    }
+    return null;
+  }
+
   // Get self-role panels with options
-  router.get('/guild/:guildId/self-role-panels', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/self-role-panels', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
     try {
-      const panels = db.prepare(
-        'SELECT * FROM self_role_panels WHERE guild_id = ? ORDER BY created_at DESC'
-      ).all(guildId);
-
-      const getOptionsStmt = db.prepare(
-        'SELECT * FROM self_role_options WHERE panel_id = ?'
-      );
+      const panels = await db.all('SELECT * FROM self_role_panels WHERE guild_id = ? ORDER BY created_at DESC, id DESC', [guildId]);
 
       const guild = client.guilds.cache.get(guildId);
-      const result = panels.map(panel => ({
-        ...panel,
-        options: getOptionsStmt.all(panel.id).map(opt => {
-          const role = guild ? guild.roles.cache.get(opt.role_id) : null;
-          return { ...opt, role_name: role ? role.name : 'Deleted Role', role_color: role ? role.hexColor : '#99aab5' };
-        }),
-      }));
+      const result = [];
+      for (const panel of panels) {
+        const options = await db.all('SELECT * FROM self_role_options WHERE panel_id = ? ORDER BY sort_order ASC, id ASC', [panel.id]);
+        result.push({
+          ...panel,
+          options: options.map(opt => {
+            const role = guild ? guild.roles.cache.get(opt.role_id) : null;
+            return { ...opt, role_name: role ? role.name : 'Deleted Role', role_color: role ? role.hexColor : '#99aab5' };
+          }),
+        });
+      }
 
       res.json({ success: true, panels: result });
     } catch (err) {
@@ -749,7 +871,10 @@ module.exports = function (client) {
     const { channelId, title, description } = req.body;
     const { createPanel } = require('../../database/selfRoles');
 
-    if (!channelId) return res.status(400).json({ error: 'channelId is required' });
+    if (!isSnowflake(channelId)) return res.status(400).json({ error: 'channelId must be a Discord ID' });
+    if (!isOptionalString(title) || !isOptionalString(description) || (title && title.length > 256) || (description && description.length > 4000)) {
+      return res.status(400).json({ error: 'Title must be text up to 256 characters, description up to 4000' });
+    }
 
     try {
       const guild = client.guilds.cache.get(guildId);
@@ -765,35 +890,40 @@ module.exports = function (client) {
         .setColor(0x5865F2);
 
       const message = await channel.send({ embeds: [embed], components: [] });
-      const panel = createPanel(guildId, channelId, message.id, title || 'Self Roles', description || null);
+      const panel = await createPanel(guildId, channelId, message.id, title || 'Self Roles', description || null);
 
       logger.info(`Self-roles panel ${panel.id} created via dashboard in #${channel.name}`);
       res.json({ success: true, panel });
     } catch (err) {
       logger.error('Failed to create self-role panel:', err);
-      res.status(500).json({ error: 'Failed to create panel: ' + err.message });
+      res.status(500).json({ error: 'Failed to create panel. Check that the bot can send messages in that channel.' });
     }
   });
 
   // Update panel title/description
   router.patch('/guild/:guildId/self-role-panels/:panelId', ensureGuildAccess, async (req, res) => {
-    const { guildId, panelId } = req.params;
+    const { guildId } = req.params;
+    const panelId = parseRowId(req.params.panelId);
+    if (!panelId) return res.status(404).json({ error: 'Panel not found' });
     const { title, description } = req.body;
+    if (!isOptionalString(title) || !isOptionalString(description) || (title && title.length > 256) || (description && description.length > 4000)) {
+      return res.status(400).json({ error: 'Title must be text up to 256 characters, description up to 4000' });
+    }
     const { getPanel, updatePanel, getRoleOptions } = require('../../database/selfRoles');
     const { buildPanelEmbed, buildPanelButtons } = require('../../bot/commands/selfroles');
 
     try {
-      const panel = getPanel(panelId);
+      const panel = await getPanel(panelId);
       if (!panel || panel.guild_id !== guildId) return res.status(404).json({ error: 'Panel not found' });
 
-      updatePanel(panelId, title || panel.title, description);
+      await updatePanel(panelId, title || panel.title, description);
 
       // Update Discord message
       try {
         const guild = client.guilds.cache.get(guildId);
         const channel = await guild.channels.fetch(panel.channel_id);
         const message = await channel.messages.fetch(panel.message_id);
-        const options = getRoleOptions(panel.id);
+        const options = await getRoleOptions(panel.id);
         const embed = buildPanelEmbed(title || panel.title, description, options, guild);
         const rows = buildPanelButtons(panel.id, options, guild);
         await message.edit({ embeds: [embed], components: rows });
@@ -811,11 +941,13 @@ module.exports = function (client) {
 
   // Delete a panel
   router.delete('/guild/:guildId/self-role-panels/:panelId', ensureGuildAccess, async (req, res) => {
-    const { guildId, panelId } = req.params;
+    const { guildId } = req.params;
+    const panelId = parseRowId(req.params.panelId);
+    if (!panelId) return res.status(404).json({ error: 'Panel not found' });
     const { getPanel, deletePanel } = require('../../database/selfRoles');
 
     try {
-      const panel = getPanel(panelId);
+      const panel = await getPanel(panelId);
       if (!panel || panel.guild_id !== guildId) return res.status(404).json({ error: 'Panel not found' });
 
       // Try to delete the Discord message
@@ -826,7 +958,7 @@ module.exports = function (client) {
         await message.delete();
       } catch { /* message may already be gone */ }
 
-      deletePanel(panelId);
+      await deletePanel(panelId);
       logger.info(`Self-roles panel ${panelId} deleted via dashboard`);
       res.json({ success: true });
     } catch (err) {
@@ -837,22 +969,32 @@ module.exports = function (client) {
 
   // Add a role to a panel
   router.post('/guild/:guildId/self-role-panels/:panelId/roles', ensureGuildAccess, async (req, res) => {
-    const { guildId, panelId } = req.params;
+    const { guildId } = req.params;
+    const panelId = parseRowId(req.params.panelId);
+    if (!panelId) return res.status(404).json({ error: 'Panel not found' });
     const { roleId, emoji, label } = req.body;
     const { getPanel, addRoleOption, getRoleOptions } = require('../../database/selfRoles');
     const { buildPanelEmbed, buildPanelButtons } = require('../../bot/commands/selfroles');
 
-    if (!roleId) return res.status(400).json({ error: 'roleId is required' });
+    if (!isSnowflake(roleId)) return res.status(400).json({ error: 'roleId must be a Discord ID' });
+    if (!isOptionalString(emoji) || !isOptionalString(label) || (label && label.length > 80) || (emoji && emoji.length > 64)) {
+      return res.status(400).json({ error: 'Label must be text up to 80 characters' });
+    }
 
     try {
-      const panel = getPanel(panelId);
+      const panel = await getPanel(panelId);
       if (!panel || panel.guild_id !== guildId) return res.status(404).json({ error: 'Panel not found' });
 
-      const existing = getRoleOptions(panel.id);
+      const botGuild = client.guilds.cache.get(guildId);
+      if (!botGuild) return res.status(404).json({ error: 'Guild not found' });
+      const roleProblem = await checkSelfRole(botGuild, req.user.id, roleId);
+      if (roleProblem) return res.status(400).json({ error: roleProblem });
+
+      const existing = await getRoleOptions(panel.id);
       if (existing.find(o => o.role_id === roleId)) return res.status(400).json({ error: 'Role already on panel' });
       if (existing.length >= 25) return res.status(400).json({ error: 'Panel has maximum 25 roles' });
 
-      const options = addRoleOption(panel.id, roleId, label || null, emoji || null, null);
+      const options = await addRoleOption(panel.id, roleId, label || null, emoji || null, null);
 
       // Update Discord message
       try {
@@ -882,16 +1024,19 @@ module.exports = function (client) {
 
   // Remove a role from a panel
   router.delete('/guild/:guildId/self-role-panels/:panelId/roles/:roleId', ensureGuildAccess, async (req, res) => {
-    const { guildId, panelId, roleId } = req.params;
+    const { guildId, roleId } = req.params;
+    const panelId = parseRowId(req.params.panelId);
+    if (!panelId) return res.status(404).json({ error: 'Panel not found' });
+    if (!isSnowflake(roleId)) return res.status(400).json({ error: 'roleId must be a Discord ID' });
     const { getPanel, removeRoleOption, getRoleOptions } = require('../../database/selfRoles');
     const { buildPanelEmbed, buildPanelButtons } = require('../../bot/commands/selfroles');
 
     try {
-      const panel = getPanel(panelId);
+      const panel = await getPanel(panelId);
       if (!panel || panel.guild_id !== guildId) return res.status(404).json({ error: 'Panel not found' });
 
-      removeRoleOption(panel.id, roleId);
-      const options = getRoleOptions(panel.id);
+      await removeRoleOption(panel.id, roleId);
+      const options = await getRoleOptions(panel.id);
 
       // Update Discord message
       try {
@@ -916,20 +1061,14 @@ module.exports = function (client) {
   // ========== Ban Appeals ==========
 
   // Get recent ban appeals
-  router.get('/guild/:guildId/appeals', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/appeals', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = 25;
     const offset = (page - 1) * limit;
 
     try {
-      const total = db.prepare(
-        'SELECT COUNT(*) as count FROM ban_appeals WHERE guild_id = ?'
-      ).get(guildId).count;
-
-      const appeals = db.prepare(
-        'SELECT * FROM ban_appeals WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
-      ).all(guildId, limit, offset);
+      const { rows: appeals, total } = await getAppeals(guildId, limit, offset);
 
       res.json({
         success: true,
@@ -947,20 +1086,14 @@ module.exports = function (client) {
   // ========== Filter Violations ==========
 
   // Get paginated filter violations
-  router.get('/guild/:guildId/filter-violations', ensureGuildAccess, (req, res) => {
+  router.get('/guild/:guildId/filter-violations', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = 25;
     const offset = (page - 1) * limit;
 
     try {
-      const total = db.prepare(
-        'SELECT COUNT(*) as count FROM filter_violations WHERE guild_id = ?'
-      ).get(guildId).count;
-
-      const violations = db.prepare(
-        'SELECT * FROM filter_violations WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
-      ).all(guildId, limit, offset);
+      const { rows: violations, total } = await getFilterViolations(guildId, limit, offset);
 
       res.json({
         success: true,
@@ -979,19 +1112,32 @@ module.exports = function (client) {
 
   const { createGiveaway, setMessageId, getAllForGuild, getGiveaway: getGiveawayById, deleteGiveaway, updateGiveaway, getEntryCount: giveawayEntryCount } = require('../../database/giveaways');
   const { buildGiveawayEmbed, buildGiveawayButtons, endGiveaway, pickEligibleWinners, beginClaimWindow, dmClaimButtons, withGiveawayLock } = require('../../bot/commands/giveaway');
-  const { EmbedBuilder: GiveawayEmbed } = require('discord.js');
   const { parseDuration, formatDuration } = require('../../bot/utils/parseDuration');
 
   // List giveaways
   const giveawayAccess = ensureGiveawayAccess(client);
 
-  router.get('/guild/:guildId/giveaways', giveawayAccess, (req, res) => {
+  // Loads the giveaway named in the URL, or answers 404/500 and returns null.
+  async function findGuildGiveaway(req, res) {
+    try {
+      const id = parseRowId(req.params.id);
+      const giveaway = id ? await getGiveawayById(id) : null;
+      if (giveaway && giveaway.guild_id === req.params.guildId) return giveaway;
+      res.status(404).json({ error: 'Giveaway not found' });
+    } catch (err) {
+      logger.error('Failed to load giveaway:', err);
+      res.status(500).json({ error: 'Failed to load giveaway' });
+    }
+    return null;
+  }
+
+  router.get('/guild/:guildId/giveaways', giveawayAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-      const giveaways = getAllForGuild(guildId).map(g => ({
-        ...g,
-        entry_count: giveawayEntryCount(g.id),
-      }));
+      const giveaways = [];
+      for (const g of await getAllForGuild(guildId)) {
+        giveaways.push({ ...g, entry_count: await giveawayEntryCount(g.id) });
+      }
       res.json({ success: true, giveaways });
     } catch (err) {
       logger.error('Failed to fetch giveaways:', err);
@@ -1004,9 +1150,12 @@ module.exports = function (client) {
     const { guildId } = req.params;
     const { channelId, title, prize, description, color, winnerCount, duration, claimTime, claimAction } = req.body;
 
+    const fieldProblem = giveawayFieldProblem(req.body);
+    if (fieldProblem) return res.status(400).json({ error: fieldProblem });
     if (!channelId || !prize || !duration) {
       return res.status(400).json({ error: 'channelId, prize, and duration are required' });
     }
+    if (!isSnowflake(channelId)) return res.status(400).json({ error: 'channelId must be a Discord ID' });
 
     const durationMs = parseDuration(duration);
     if (!durationMs) {
@@ -1030,21 +1179,21 @@ module.exports = function (client) {
       if (!guild) return res.status(404).json({ error: 'Guild not found' });
 
       // Enforce locked giveaway channel
-      const giveawaySettings = getSettings(guildId);
+      const giveawaySettings = await getSettings(guildId);
       if (giveawaySettings.giveaway_channel_id && channelId !== giveawaySettings.giveaway_channel_id) {
         return res.status(400).json({ error: `Giveaways can only be created in the designated channel.` });
       }
 
-      const giveaway = createGiveaway(
+      const giveaway = await createGiveaway(
         guildId, channelId, req.user.id,
         title || '🎉 GIVEAWAY 🎉', prize, description || null,
-        color || null, parseInt(winnerCount) || 1, claimSeconds, claimActionValue, endsAt
+        color || null, clampWinnerCount(winnerCount), claimSeconds, claimActionValue, endsAt
       );
 
       const embed = buildGiveawayEmbed(giveaway, 0);
       const components = buildGiveawayButtons(giveaway.id);
 
-      const settings = getSettings(guildId);
+      const settings = await getSettings(guildId);
       let pingContent = null;
       if (settings.giveaway_ping_role_id) {
         pingContent = `<@&${settings.giveaway_ping_role_id}>`;
@@ -1052,73 +1201,88 @@ module.exports = function (client) {
 
       const channel = await guild.channels.fetch(channelId);
       const msg = await channel.send({ content: pingContent, embeds: [embed], components });
-      setMessageId(giveaway.id, msg.id);
+      await setMessageId(giveaway.id, msg.id);
 
       logger.info(`Giveaway ${giveaway.id} created via dashboard by ${req.user.username}`);
       res.json({ success: true, giveaway: { ...giveaway, message_id: msg.id, entry_count: 0 } });
     } catch (err) {
       logger.error('Failed to create giveaway:', err);
-      res.status(500).json({ error: 'Failed to create giveaway: ' + err.message });
+      res.status(500).json({ error: 'Failed to create giveaway. Check that the bot can send messages in that channel.' });
     }
   });
 
   // Edit giveaway
   router.patch('/guild/:guildId/giveaways/:id', giveawayAccess, async (req, res) => {
-    const giveaway = getGiveawayById(parseInt(req.params.id));
-    if (!giveaway || giveaway.guild_id !== req.params.guildId) {
-      return res.status(404).json({ error: 'Giveaway not found' });
-    }
+    const giveaway = await findGuildGiveaway(req, res);
+    if (!giveaway) return;
 
     const { title, prize, description, color, winnerCount, claimTime, claimAction } = req.body;
-    const newTitle = title !== undefined ? title : giveaway.title;
-    const newPrize = prize !== undefined ? prize : giveaway.prize;
-    const newDescription = description !== undefined ? description : giveaway.description;
-    const newColor = color !== undefined ? color : giveaway.color;
-    const newWinnerCount = winnerCount !== undefined ? parseInt(winnerCount) || 1 : giveaway.winner_count;
+    const fieldProblem = giveawayFieldProblem(req.body);
+    if (fieldProblem) return res.status(400).json({ error: fieldProblem });
 
-    let newClaimTime = giveaway.claim_time;
+    let claimTimeUpdate;
     if (claimTime !== undefined) {
       if (claimTime) {
         const claimMs = parseDuration(claimTime);
         if (!claimMs) {
           return res.status(400).json({ error: 'Invalid claim time. Examples: 5s, 5m, 24h, 3d' });
         }
-        newClaimTime = Math.round(claimMs / 1000);
+        claimTimeUpdate = Math.round(claimMs / 1000);
       } else {
-        newClaimTime = null;
+        claimTimeUpdate = null;
       }
     }
 
-    const newClaimAction = claimAction === 'void' || claimAction === 'reroll' ? claimAction : giveaway.claim_action;
-
-    if (!newPrize) {
-      return res.status(400).json({ error: 'Prize is required' });
-    }
-
     try {
-      updateGiveaway(giveaway.id, newTitle, newPrize, newDescription, newColor, newWinnerCount, newClaimTime, newClaimAction);
+      // Hold the giveaway lock so ending or rerolling cannot interleave with
+      // this edit, and decide active/ended from a fresh read inside it.
+      const result = await withGiveawayLock(giveaway.id, async () => {
+        const fresh = await getGiveawayById(giveaway.id);
+        if (!fresh) return { status: 404, error: 'Giveaway not found' };
 
-      // Update Discord message if active
-      if (!giveaway.ended && giveaway.message_id) {
-        try {
-          const guild = client.guilds.cache.get(giveaway.guild_id);
-          if (guild) {
-            const channel = await guild.channels.fetch(giveaway.channel_id);
-            if (channel) {
-              const message = await channel.messages.fetch(giveaway.message_id);
-              if (message) {
-                const updated = getGiveawayById(giveaway.id);
-                const count = giveawayEntryCount(giveaway.id);
-                await message.edit({
-                  embeds: [buildGiveawayEmbed(updated, count)],
-                  components: buildGiveawayButtons(giveaway.id),
-                });
+        const newPrize = prize !== undefined ? prize : fresh.prize;
+        if (!newPrize) return { status: 400, error: 'Prize is required' };
+        await updateGiveaway(
+          fresh.id,
+          title !== undefined ? title : fresh.title,
+          newPrize,
+          description !== undefined ? description : fresh.description,
+          color !== undefined ? color : fresh.color,
+          winnerCount !== undefined ? clampWinnerCount(winnerCount) : fresh.winner_count,
+          claimTimeUpdate !== undefined ? claimTimeUpdate : fresh.claim_time,
+          claimAction === 'void' || claimAction === 'reroll' ? claimAction : fresh.claim_action
+        );
+
+        // Update Discord message if active
+        if (!fresh.ended && fresh.message_id) {
+          try {
+            const guild = client.guilds.cache.get(fresh.guild_id);
+            if (guild) {
+              const channel = await guild.channels.fetch(fresh.channel_id);
+              if (channel) {
+                const message = await channel.messages.fetch(fresh.message_id);
+                if (message) {
+                  const updated = await getGiveawayById(fresh.id);
+                  const count = await giveawayEntryCount(fresh.id);
+                  await message.edit({
+                    embeds: [buildGiveawayEmbed(updated, count)],
+                    components: buildGiveawayButtons(fresh.id),
+                  });
+                }
               }
             }
+          } catch (err) {
+            logger.warn(`Failed to update giveaway message: ${err.message}`);
           }
-        } catch (err) {
-          logger.warn(`Failed to update giveaway message: ${err.message}`);
         }
+        return null;
+      });
+
+      if (result.busy) {
+        return res.status(409).json({ error: 'Giveaway is being processed right now, try again in a moment' });
+      }
+      if (result.value) {
+        return res.status(result.value.status).json({ error: result.value.error });
       }
 
       logger.info(`Giveaway ${giveaway.id} edited via dashboard by ${req.user.username}`);
@@ -1131,10 +1295,8 @@ module.exports = function (client) {
 
   // End giveaway
   router.post('/guild/:guildId/giveaways/:id/end', giveawayAccess, async (req, res) => {
-    const giveaway = getGiveawayById(parseInt(req.params.id));
-    if (!giveaway || giveaway.guild_id !== req.params.guildId) {
-      return res.status(404).json({ error: 'Giveaway not found' });
-    }
+    const giveaway = await findGuildGiveaway(req, res);
+    if (!giveaway) return;
     if (giveaway.ended) {
       return res.status(400).json({ error: 'Giveaway already ended' });
     }
@@ -1142,7 +1304,7 @@ module.exports = function (client) {
     try {
       const winners = await endGiveaway(client, giveaway);
       if (!winners) {
-        return res.status(409).json({ error: 'Giveaway already ended or is being ended right now' });
+        return res.status(409).json({ error: 'Giveaway was not ended: it already ended, is being ended right now, or the bot cannot reach that server' });
       }
       logger.info(`Giveaway ${giveaway.id} ended via dashboard by ${req.user.username}`);
       res.json({ success: true, winners });
@@ -1155,16 +1317,14 @@ module.exports = function (client) {
   // Reroll giveaway
   router.post('/guild/:guildId/giveaways/:id/reroll', giveawayAccess, async (req, res) => {
     const { getEntries, markEnded: markGiveawayEnded } = require('../../database/giveaways');
-    const giveaway = getGiveawayById(parseInt(req.params.id));
-    if (!giveaway || giveaway.guild_id !== req.params.guildId) {
-      return res.status(404).json({ error: 'Giveaway not found' });
-    }
+    const giveaway = await findGuildGiveaway(req, res);
+    if (!giveaway) return;
     if (!giveaway.ended) {
       return res.status(400).json({ error: 'Giveaway has not ended yet' });
     }
 
     try {
-      const entries = getEntries(giveaway.id);
+      const entries = await getEntries(giveaway.id);
       if (entries.length === 0) {
         return res.status(400).json({ error: 'No entries to reroll' });
       }
@@ -1177,8 +1337,8 @@ module.exports = function (client) {
       const rerolled = await withGiveawayLock(giveaway.id, async () => {
         const picked = await pickEligibleWinners(guild, entries, giveaway.winner_count);
         if (picked.length === 0) return { newWinners: picked, claimDeadline: null };
-        markGiveawayEnded(giveaway.id, JSON.stringify(picked));
-        const deadline = beginClaimWindow(giveaway.id, giveaway.claim_time, { resetClaims: true });
+        await markGiveawayEnded(giveaway.id, JSON.stringify(picked));
+        const deadline = await beginClaimWindow(giveaway.id, giveaway.claim_time, { resetClaims: true });
         return { newWinners: picked, claimDeadline: deadline };
       });
       if (rerolled.busy) {
@@ -1226,10 +1386,8 @@ module.exports = function (client) {
 
   // Delete giveaway
   router.delete('/guild/:guildId/giveaways/:id', giveawayAccess, async (req, res) => {
-    const giveaway = getGiveawayById(parseInt(req.params.id));
-    if (!giveaway || giveaway.guild_id !== req.params.guildId) {
-      return res.status(404).json({ error: 'Giveaway not found' });
-    }
+    const giveaway = await findGuildGiveaway(req, res);
+    if (!giveaway) return;
 
     try {
       // Try to delete Discord message
@@ -1244,7 +1402,7 @@ module.exports = function (client) {
         } catch { /* message may already be gone */ }
       }
 
-      deleteGiveaway(giveaway.id);
+      await deleteGiveaway(giveaway.id);
       logger.info(`Giveaway ${giveaway.id} deleted via dashboard by ${req.user.username}`);
       res.json({ success: true });
     } catch (err) {
@@ -1254,20 +1412,21 @@ module.exports = function (client) {
   });
 
   // Giveaway host users
-  router.post('/guild/:guildId/giveaway-hosts', ensureGuildAccess, (req, res) => {
+  router.post('/guild/:guildId/giveaway-hosts', ensureGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { userId, action } = req.body;
 
     if (!userId || !action) {
       return res.status(400).json({ error: 'userId and action are required' });
     }
+    if (!isSnowflake(userId)) return res.status(400).json({ error: 'userId must be a Discord user ID' });
 
     try {
       let users;
       if (action === 'add') {
-        users = addGiveawayHostUser(guildId, userId);
+        users = await addGiveawayHostUser(guildId, userId);
       } else if (action === 'remove') {
-        users = removeGiveawayHostUser(guildId, userId);
+        users = await removeGiveawayHostUser(guildId, userId);
       } else {
         return res.status(400).json({ error: 'action must be add or remove' });
       }

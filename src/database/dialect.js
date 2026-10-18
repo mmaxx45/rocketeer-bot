@@ -17,7 +17,10 @@ function translateDatetime(sql) {
       const sign = concat[1] === '-' ? '-' : '+';
       return `to_char(now() AT TIME ZONE 'UTC' ${sign} (${concat[2]})::interval, ${UTC_NOW_FORMAT})`;
     }
-    return `to_char(now() AT TIME ZONE 'UTC' ${expression}, ${UTC_NOW_FORMAT})`;
+    // Any other modifier is an expression that evaluates to something like
+    // '-7 days' (e.g. `? || ' days'` with a negative number bound): add it as
+    // an interval, which handles both signs.
+    return `to_char(now() AT TIME ZONE 'UTC' + (${expression})::interval, ${UTC_NOW_FORMAT})`;
   });
 }
 
@@ -30,7 +33,9 @@ function translateStrftime(sql) {
       .replace(/%H/g, 'HH24')
       .replace(/%M/g, 'MI')
       .replace(/%S/g, 'SS');
-    return `to_char(${column.trim()}, '${postgresFormat}')`;
+    // Timestamps are stored as TEXT ('YYYY-MM-DD HH:MM:SS'), so cast first:
+    // Postgres has no to_char(text, ...).
+    return `to_char((${column.trim()})::timestamp, '${postgresFormat}')`;
   });
 }
 
@@ -41,8 +46,14 @@ function translateInsertOrIgnore(sql) {
   return rewritten.replace(/\s*$/, '') + ' ON CONFLICT DO NOTHING';
 }
 
-function translateInsertOrReplace(sql) {
-  return sql.replace(/^\s*insert\s+or\s+replace\s+into/i, 'INSERT INTO');
+// INSERT OR REPLACE has no direct equivalent: dropping the OR REPLACE would
+// turn it into an INSERT that fails on conflict. Write the query as
+// INSERT ... ON CONFLICT (...) DO UPDATE instead, which both backends accept.
+function rejectInsertOrReplace(sql) {
+  if (/^\s*insert\s+or\s+replace\s+into/i.test(sql)) {
+    throw new Error('INSERT OR REPLACE is not portable; use INSERT ... ON CONFLICT (...) DO UPDATE');
+  }
+  return sql;
 }
 
 function numberPlaceholders(sql) {
@@ -71,12 +82,13 @@ function numberPlaceholders(sql) {
   return result;
 }
 
+// SQLite's LIKE is case-insensitive, Postgres's is not.
 function translateLooseLike(sql) {
-  return sql.replace(/\bLIKE\b/g, 'ILIKE');
+  return sql.replace(/\bLIKE\b/gi, 'ILIKE');
 }
 
 function toPostgres(sql) {
-  let out = translateInsertOrReplace(sql);
+  let out = rejectInsertOrReplace(sql);
   out = translateInsertOrIgnore(out);
   out = translateDatetime(out);
   out = translateStrftime(out);
@@ -84,18 +96,4 @@ function toPostgres(sql) {
   return numberPlaceholders(out);
 }
 
-const SQLITE_ISMS = [
-  { name: "datetime('now'", test: sql => /datetime\(/i.test(sql) },
-  { name: 'INSERT OR IGNORE/REPLACE', test: sql => /insert\s+or\s+(ignore|replace)/i.test(sql) },
-  { name: 'AUTOINCREMENT', test: sql => /autoincrement/i.test(sql) },
-  { name: 'strftime(', test: sql => /strftime\(/i.test(sql) },
-  { name: 'PRAGMA', test: sql => /pragma/i.test(sql) },
-  { name: 'sqlite_master', test: sql => /sqlite_master/i.test(sql) },
-  { name: 'last_insert_rowid', test: sql => /last_insert_rowid/i.test(sql) },
-];
-
-function findSqliteIsms(sql) {
-  return SQLITE_ISMS.filter(ism => ism.test(sql)).map(ism => ism.name);
-}
-
-module.exports = { toPostgres, findSqliteIsms, numberPlaceholders };
+module.exports = { toPostgres, numberPlaceholders };

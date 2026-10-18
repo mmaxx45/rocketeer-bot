@@ -277,12 +277,12 @@ async function loadSelfRolePanels(guildId) {
       card.id = `selfrole-panel-${panel.id}`;
 
       const rolesList = panel.options.map(opt => {
-        const emojiDisplay = opt.emoji ? opt.emoji + ' ' : '';
+        const emojiDisplay = opt.emoji ? escapeHtml(opt.emoji) + ' ' : '';
         const labelDisplay = opt.label || opt.role_name;
-        return `<span class="badge bg-secondary d-inline-flex align-items-center gap-1 py-1 me-1 mb-1" data-role-id="${opt.role_id}">
+        return `<span class="badge bg-secondary d-inline-flex align-items-center gap-1 py-1 me-1 mb-1" data-role-id="${escapeHtml(opt.role_id)}">
           ${emojiDisplay}<span style="color: ${escapeHtml(opt.role_color)}">${escapeHtml(labelDisplay)}</span>
           <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.5rem; width: 0.5em; height: 0.5em;"
-                  onclick="removeSelfRole('${guildId}', '${panel.id}', '${opt.role_id}', this)"></button>
+                  onclick="removeSelfRole(${jsArg(guildId)}, ${jsArg(panel.id)}, ${jsArg(opt.role_id)}, this)"></button>
         </span>`;
       }).join('');
 
@@ -291,11 +291,11 @@ async function loadSelfRolePanels(guildId) {
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <strong>${escapeHtml(panel.title || 'Self Roles')}</strong>
             <span class="text-muted" style="font-size: 0.8rem;">Panel #${panel.id}</span>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="editPanelDescription('${guildId}', '${panel.id}', this)" title="Edit title & description">
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="editPanelDescription(${jsArg(guildId)}, ${jsArg(panel.id)}, this)" title="Edit title & description">
               <i class="bi bi-pencil"></i>
             </button>
           </div>
-          <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteSelfRolePanel('${guildId}', '${panel.id}')">
+          <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteSelfRolePanel(${jsArg(guildId)}, ${jsArg(panel.id)})">
             <i class="bi bi-trash"></i> Delete
           </button>
         </div>
@@ -323,7 +323,7 @@ async function loadSelfRolePanels(guildId) {
               <label class="setting-label" style="font-size:0.75rem;">Label <span class="text-muted">(optional)</span></label>
               <input type="text" id="selfrole-add-label-${panel.id}" class="form-control form-control-sm" placeholder="Custom text" style="width:130px;">
             </div>
-            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addSelfRole('${guildId}', '${panel.id}')">
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addSelfRole(${jsArg(guildId)}, ${jsArg(panel.id)})">
               <i class="bi bi-plus-lg"></i> Add Role
             </button>
           </div>
@@ -481,10 +481,20 @@ async function editPanelDescription(guildId, panelId, btn) {
 }
 
 // ===== Utility =====
+// Escapes text for HTML element content and quoted attribute values.
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// A value as a JS string literal for an inline handler attribute, e.g.
+// onclick="fn(${jsArg(id)})": JSON-quoted, then escaped for the attribute.
+function jsArg(value) {
+  return escapeHtml(JSON.stringify(String(value ?? '')));
 }
 
 // ===== Initialize Bootstrap Popovers =====
@@ -544,7 +554,7 @@ async function loadWhitelist(guildId) {
       return;
     }
     container.innerHTML = result.words.map(w =>
-      `<span class="badge bg-success d-flex align-items-center gap-1">${escapeHtml(w.word)} <button type="button" class="btn-close btn-close-white btn-close-sm" onclick="removeWhitelistWord('${guildId}', '${encodeURIComponent(w.word)}', this)"></button></span>`
+      `<span class="badge bg-success d-flex align-items-center gap-1">${escapeHtml(w.word)} <button type="button" class="btn-close btn-close-white btn-close-sm" onclick="removeWhitelistWord(${jsArg(guildId)}, ${jsArg(encodeURIComponent(w.word))}, this)"></button></span>`
     ).join('');
   } catch (err) {
     container.innerHTML = `<span class="text-danger small">${escapeHtml(err.message)}</span>`;
@@ -613,7 +623,7 @@ async function addGiveawayHost(guildId) {
       const list = document.getElementById('giveaway-hosts-list');
       const badge = document.createElement('span');
       badge.className = 'badge bg-secondary d-flex align-items-center gap-1';
-      badge.innerHTML = `${escapeHtml(userId)} <button type="button" class="btn-close btn-close-white btn-close-sm" onclick="removeGiveawayHost('${guildId}', '${userId}', this)"></button>`;
+      badge.innerHTML = `${escapeHtml(userId)} <button type="button" class="btn-close btn-close-white btn-close-sm" onclick="removeGiveawayHost(${jsArg(guildId)}, ${jsArg(userId)}, this)"></button>`;
       list.appendChild(badge);
       input.value = '';
       showToast('Giveaway host added.');
@@ -722,12 +732,12 @@ async function loadGiveaways(guildId) {
 
       let actions = '';
       if (isActive) {
-        actions += `<button class="btn btn-sm btn-outline-light" onclick="editGiveaway('${guildId}', ${g.id}, this)" data-title="${escapeHtml(g.title || '')}" data-prize="${escapeHtml(g.prize)}" data-description="${escapeHtml(g.description || '')}" data-color="${escapeHtml(g.color || '#5865F2')}" data-winners="${g.winner_count}" data-claim="${g.claim_time || ''}" data-claimaction="${g.claim_action || 'reroll'}"><i class="bi bi-pencil"></i> Edit</button> `;
-        actions += `<button class="btn btn-sm btn-outline-warning" onclick="endGiveaway('${guildId}', ${g.id})"><i class="bi bi-stop-circle"></i> End</button> `;
+        actions += `<button class="btn btn-sm btn-outline-light" onclick="editGiveaway(${jsArg(guildId)}, ${jsArg(g.id)}, this)" data-title="${escapeHtml(g.title || '')}" data-prize="${escapeHtml(g.prize)}" data-description="${escapeHtml(g.description || '')}" data-color="${escapeHtml(g.color || '#5865F2')}" data-winners="${escapeHtml(g.winner_count)}" data-claim="${escapeHtml(g.claim_time || '')}" data-claimaction="${escapeHtml(g.claim_action || 'reroll')}"><i class="bi bi-pencil"></i> Edit</button> `;
+        actions += `<button class="btn btn-sm btn-outline-warning" onclick="endGiveaway(${jsArg(guildId)}, ${jsArg(g.id)})"><i class="bi bi-stop-circle"></i> End</button> `;
       } else {
-        actions += `<button class="btn btn-sm btn-outline-info" onclick="rerollGiveaway('${guildId}', ${g.id})"><i class="bi bi-arrow-repeat"></i> Reroll</button> `;
+        actions += `<button class="btn btn-sm btn-outline-info" onclick="rerollGiveaway(${jsArg(guildId)}, ${jsArg(g.id)})"><i class="bi bi-arrow-repeat"></i> Reroll</button> `;
       }
-      actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteGiveaway('${guildId}', ${g.id})"><i class="bi bi-trash"></i></button>`;
+      actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteGiveaway(${jsArg(guildId)}, ${jsArg(g.id)})"><i class="bi bi-trash"></i></button>`;
 
       const winners = g.winners ? JSON.parse(g.winners) : [];
       const winnerText = winners.length > 0 ? winners.map(id => `<span class="text-success">${escapeHtml(id)}</span>`).join(', ') : '';
@@ -740,8 +750,8 @@ async function loadGiveaways(guildId) {
                 <strong>${escapeHtml(g.title || '🎉 GIVEAWAY 🎉')}</strong> ${statusBadge}
                 <div class="small text-muted mt-1">
                   <i class="bi bi-gift"></i> ${escapeHtml(g.prize)} &middot;
-                  <i class="bi bi-people"></i> ${g.entry_count} entries &middot;
-                  <i class="bi bi-trophy"></i> ${g.winner_count} winner(s) &middot;
+                  <i class="bi bi-people"></i> ${escapeHtml(g.entry_count)} entries &middot;
+                  <i class="bi bi-trophy"></i> ${escapeHtml(g.winner_count)} winner(s) &middot;
                   <i class="bi bi-clock"></i> ${timeStr}${g.claim_time ? ` &middot; <i class="bi bi-hourglass-split"></i> claim ${formatClaimTime(g.claim_time)}` : ''}
                 </div>
                 ${winnerText ? `<div class="small mt-1"><i class="bi bi-trophy-fill text-warning"></i> Winners: ${winnerText}</div>` : ''}

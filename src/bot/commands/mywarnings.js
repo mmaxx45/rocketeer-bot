@@ -8,7 +8,7 @@ module.exports = {
     .setDescription('View your own warnings'),
 
   async execute(interaction) {
-    const warnings = getWarnings(interaction.guild.id, interaction.user.id);
+    const warnings = await getWarnings(interaction.guild.id, interaction.user.id);
     const embed = buildWarningsEmbed(warnings, interaction.user, interaction.guild, false);
     embed.setTitle('Your Warnings');
 

@@ -1,18 +1,10 @@
 'use strict';
 
+// SQLite schema migrations, tracked with PRAGMA user_version. Postgres starts
+// from schema.postgres.sql instead (see db.js).
+
 let db;
 let logger;
-
-function columnExists(table, column) {
-  const cols = db.pragma(`table_info(${table})`);
-  return cols.some(c => c.name === column);
-}
-
-function safeAddColumn(table, column, type) {
-  if (!columnExists(table, column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-  }
-}
 
 function columnExists(table, column) {
   const cols = db.pragma(`table_info(${table})`);
@@ -439,6 +431,27 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_giveaway_claims_status ON giveaway_claims(giveaway_id, status);
     `);
     db.pragma('user_version = 26');
+  }
+
+  if (version < 27) {
+    logger.info('Running database migration v27: dashboard sessions, one open modmail thread per user');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS web_sessions (
+        sid TEXT PRIMARY KEY,
+        sess TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at);
+
+      UPDATE modmail_threads SET status = 'closed', closed_at = datetime('now')
+      WHERE status = 'open' AND id NOT IN (
+        SELECT MAX(id) FROM modmail_threads WHERE status = 'open' GROUP BY guild_id, user_id
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_modmail_one_open ON modmail_threads(guild_id, user_id) WHERE status = 'open';
+    `);
+    db.pragma('user_version = 27');
   }
 
   logger.info(`Database at schema version ${db.pragma('user_version', { simple: true })}`);

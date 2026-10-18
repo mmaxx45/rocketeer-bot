@@ -1,25 +1,20 @@
 const logger = require('../../logger');
-const { getSettings } = require('../../database/settings');
-const { addWarning, getWarningCount } = require('../../database/warnings');
+const { getSettings, parseJsonList } = require('../../database/settings');
+const { addWarningNumbered } = require('../../database/warnings');
 const { addModAction } = require('../../database/modactions');
 const { isExempt } = require('../utils/permissions');
-const { getExemptChannels } = require('../../database/settings');
 const { checkMessage } = require('../utils/wordFilter');
-const { getFilterWords, addFilterViolation, getRecentViolations } = require('../../database/wordFilter');
+const { getFilterWords, addFilterViolation, getRecentViolations, getWhitelist } = require('../../database/wordFilter');
 const { parseBannedDomains, checkForBannedLinks } = require('../utils/linkFilter');
 const { EmbedBuilder } = require('discord.js');
 
 module.exports = {
   name: 'messageUpdate',
   async execute(oldMessage, newMessage) {
-    // Fetch partial messages if needed
-    if (oldMessage.partial) {
-      try {
-        oldMessage = await oldMessage.fetch();
-      } catch {
-        // Can't fetch old message — proceed and treat as changed
-      }
-    }
+    // An uncached (partial) old message has no previous content, and fetching
+    // it would only return the edited text. Treat it as changed then; the
+    // content comparison below only applies when the old version was cached.
+    const oldContentKnown = !oldMessage.partial;
     if (newMessage.partial) {
       try {
         newMessage = await newMessage.fetch();
@@ -33,11 +28,11 @@ module.exports = {
     if (newMessage.author?.bot) return;
     if (!newMessage.content) return;
 
-    // If content hasn't changed, skip
-    if (oldMessage.content === newMessage.content) return;
+    // If content hasn't changed (e.g. an embed was added), skip
+    if (oldContentKnown && oldMessage.content === newMessage.content) return;
 
     const guildId = newMessage.guild.id;
-    const settings = getSettings(guildId);
+    const settings = await getSettings(guildId);
 
     // Fetch member for exempt check
     let member = newMessage.member;
@@ -52,7 +47,7 @@ module.exports = {
     if (isExempt(member, settings)) return;
 
     // Check exempt channels
-    const exemptChannels = getExemptChannels(guildId);
+    const exemptChannels = parseJsonList(settings, 'exempt_channels');
     if (exemptChannels.includes(newMessage.channel.id)) return;
 
     // Check for banned links in edited message
@@ -95,10 +90,11 @@ module.exports = {
     // Word filter
     if (!settings.filter_enabled) return;
 
-    const filterWords = getFilterWords(guildId);
+    const filterWords = await getFilterWords(guildId);
     if (filterWords.length === 0) return;
 
-    const matches = checkMessage(newMessage.content, filterWords);
+    const whitelist = await getWhitelist(guildId);
+    const matches = checkMessage(newMessage.content, filterWords, whitelist);
     if (matches.length === 0) return;
 
     const match = matches[0];
@@ -111,17 +107,16 @@ module.exports = {
     }
 
     // Log violation
-    addFilterViolation(guildId, newMessage.author.id, match.word, match.tier, newMessage.content, newMessage.channel.id);
+    await addFilterViolation(guildId, newMessage.author.id, match.word, match.tier, newMessage.content, newMessage.channel.id);
 
     logger.info(`Word filter triggered on edit: user=${newMessage.author.username} guild=${guildId} word=${match.word} tier=${match.tier}`);
 
     if (match.tier === 'hard') {
       // Hard slur: auto-warn + log + DM
-      addWarning(guildId, newMessage.author.id, newMessage.client.user.id, `Automatic warning: used a prohibited word in edited message (hard filter)`, 'manual', newMessage.content);
-      const warningCount = getWarningCount(guildId, newMessage.author.id);
+      const warningCount = await addWarningNumbered(guildId, newMessage.author.id, newMessage.client.user.id, 'Automatic warning: used a prohibited word in edited message (hard filter)', 'manual', newMessage.content);
 
       try {
-        addModAction(guildId, newMessage.client.user.id, 'filter_warn', newMessage.author.id, `Hard filter triggered on edit: "${match.word}"`);
+        await addModAction(guildId, newMessage.client.user.id, 'filter_warn', newMessage.author.id, `Hard filter triggered on edit: "${match.word}"`);
       } catch (err) {
         logger.warn(`Failed to log filter mod action: ${err.message}`);
       }
@@ -166,7 +161,7 @@ module.exports = {
     } else if (match.tier === 'soft') {
       const windowMinutes = settings.soft_slur_window_minutes || 60;
       const threshold = settings.soft_slur_threshold || 3;
-      const recentCount = getRecentViolations(guildId, newMessage.author.id, windowMinutes);
+      const recentCount = await getRecentViolations(guildId, newMessage.author.id, windowMinutes);
 
       if (settings.warn_log_channel_id) {
         try {

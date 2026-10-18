@@ -64,7 +64,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
-    const settings = getSettings(interaction.guild.id);
+    const settings = await getSettings(interaction.guild.id);
 
     if (!canViewModActions(interaction.member, settings)) {
       return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
@@ -74,7 +74,7 @@ module.exports = {
     const page = Math.max(1, interaction.options.getInteger('page') || 1);
     const offset = (page - 1) * PAGE_SIZE;
 
-    const { rows, total } = getModActions(interaction.guild.id, targetUser.id, PAGE_SIZE, offset);
+    const { rows, total } = await getModActions(interaction.guild.id, targetUser.id, PAGE_SIZE, offset);
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
     const embed = buildModActionsEmbed(rows, total, targetUser, page, totalPages);

@@ -62,6 +62,9 @@ async function resolveUserNames(botGuild, userIds) {
   return map;
 }
 
+// Express 4 does not catch rejected promises from async handlers.
+const { asyncHandler } = require('../asyncHandler');
+
 module.exports = function (client) {
   const router = express.Router();
   router.use(ensureAuthenticated);
@@ -88,7 +91,7 @@ module.exports = function (client) {
   });
 
   // Guild settings page
-  router.get('/guild/:guildId', (req, res) => {
+  router.get('/guild/:guildId', asyncHandler(async (req, res) => {
     const { guildId } = req.params;
 
     if (!userCanManageGuild(req.user, guildId)) {
@@ -98,10 +101,10 @@ module.exports = function (client) {
     const botGuild = client.guilds.cache.get(guildId);
     if (!botGuild) return res.status(404).send('Bot is not in this guild');
 
-    const settings = getSettings(guildId);
-    const exemptChannels = getExemptChannels(guildId);
-    const bannedDomains = getBannedDomains(guildId);
-    const imageOnlyChannels = getImageOnlyChannels(guildId);
+    const settings = await getSettings(guildId);
+    const exemptChannels = await getExemptChannels(guildId);
+    const bannedDomains = await getBannedDomains(guildId);
+    const imageOnlyChannels = await getImageOnlyChannels(guildId);
 
     const roles = botGuild.roles.cache
       .filter(r => r.id !== guildId) // exclude @everyone
@@ -136,10 +139,10 @@ module.exports = function (client) {
       categories,
       emojis,
     });
-  });
+  }));
 
   // Warnings page
-  router.get('/guild/:guildId/warnings', async (req, res) => {
+  router.get('/guild/:guildId/warnings', asyncHandler(async (req, res) => {
     const { guildId } = req.params;
 
     if (!userCanManageGuild(req.user, guildId)) {
@@ -153,7 +156,7 @@ module.exports = function (client) {
     const limit = 25;
     const offset = (page - 1) * limit;
 
-    const { rows: warnings, total } = getAllGuildWarnings(guildId, limit, offset);
+    const { rows: warnings, total } = await getAllGuildWarnings(guildId, limit, offset);
     const totalPages = Math.ceil(total / limit);
 
     const allIds = warnings.flatMap(w => [w.user_id, w.moderator_id]);
@@ -170,10 +173,10 @@ module.exports = function (client) {
       total,
       userMap,
     });
-  });
+  }));
 
   // Stats page
-  router.get('/guild/:guildId/stats', async (req, res) => {
+  router.get('/guild/:guildId/stats', asyncHandler(async (req, res) => {
     const { guildId } = req.params;
 
     if (!userCanManageGuild(req.user, guildId)) {
@@ -184,55 +187,55 @@ module.exports = function (client) {
     if (!botGuild) return res.status(404).send('Bot is not in this guild');
 
     // Total warnings
-    const totalWarnings = db.prepare('SELECT COUNT(*) as count FROM warnings WHERE guild_id = ?').get(guildId).count;
+    const { count: totalWarnings } = await db.get('SELECT COUNT(*) as count FROM warnings WHERE guild_id = ?', [guildId]);
 
     // Total bans
-    const totalBans = db.prepare("SELECT COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND action_type = 'ban'").get(guildId).count;
+    const { count: totalBans } = await db.get("SELECT COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND action_type = 'ban'", [guildId]);
 
     // Total crosspost incidents
-    const totalCrosspostIncidents = db.prepare('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?').get(guildId).count;
+    const { count: totalCrosspostIncidents } = await db.get('SELECT COUNT(*) as count FROM crosspost_incidents WHERE guild_id = ?', [guildId]);
 
     // Active moderators (distinct human mods with actions in the last 30 days)
     const botId = client.user.id;
-    const activeMods = db.prepare(`
+    const { count: activeMods } = await db.get(`
       SELECT COUNT(DISTINCT moderator_id) as count FROM mod_actions
       WHERE guild_id = ? AND moderator_id != ? AND created_at >= datetime('now', '-30 days')
-    `).get(guildId, botId).count;
+    `, [guildId, botId]);
 
     // Most warned users (top 10)
-    const mostWarnedUsers = db.prepare(`
+    const mostWarnedUsers = await db.all(`
       SELECT user_id, COUNT(*) as count FROM warnings
       WHERE guild_id = ?
       GROUP BY user_id
       ORDER BY count DESC
       LIMIT 10
-    `).all(guildId);
+    `, [guildId]);
 
     // Most active moderators (top 10)
-    const mostActiveMods = db.prepare(`
+    const mostActiveMods = await db.all(`
       SELECT moderator_id, COUNT(*) as count FROM mod_actions
       WHERE guild_id = ?
       GROUP BY moderator_id
       ORDER BY count DESC
       LIMIT 10
-    `).all(guildId);
+    `, [guildId]);
 
     // Warning reasons breakdown
-    const warningReasons = db.prepare(`
+    const warningReasons = await db.all(`
       SELECT reason, COUNT(*) as count FROM warnings
       WHERE guild_id = ?
       GROUP BY reason
       ORDER BY count DESC
       LIMIT 15
-    `).all(guildId);
+    `, [guildId]);
 
     // Recent activity (last 10 mod actions)
-    const recentActivity = db.prepare(`
+    const recentActivity = await db.all(`
       SELECT * FROM mod_actions
       WHERE guild_id = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, id DESC
       LIMIT 10
-    `).all(guildId);
+    `, [guildId]);
 
     const allIds = [
       ...mostWarnedUsers.map(u => u.user_id),
@@ -259,7 +262,7 @@ module.exports = function (client) {
         recentActivity,
       },
     });
-  });
+  }));
 
   return router;
 };

@@ -6,12 +6,15 @@ function ensureAuthenticated(req, res, next) {
   res.redirect('/');
 }
 
+// Express 4 does not catch rejected promises from async handlers.
+const { asyncHandler } = require('../asyncHandler');
+
 module.exports = function (client) {
   const router = express.Router();
   router.use(ensureAuthenticated);
 
   // Check if user is allowed to host giveaways in this guild
-  function canAccessGiveaways(user, guildId) {
+  async function canAccessGiveaways(user, guildId) {
     // User must be in the guild (from OAuth guilds list)
     const userGuild = (user.guilds || []).find(g => g.id === guildId);
     if (!userGuild) return false;
@@ -22,11 +25,11 @@ module.exports = function (client) {
     if ((perms & MANAGE_GUILD) === MANAGE_GUILD) return true;
 
     // Check giveaway-specific permissions
-    const settings = getSettings(guildId);
+    const settings = await getSettings(guildId);
 
     // Check host role — user must have it in Discord
     // We can't check roles from OAuth data, but we can check if user is in the host users list
-    const hostUsers = getGiveawayHostUsers(guildId);
+    const hostUsers = await getGiveawayHostUsers(guildId);
     if (hostUsers.includes(user.id)) return true;
 
     // Check if user has the host role via bot's guild member cache
@@ -42,17 +45,17 @@ module.exports = function (client) {
   }
 
   // Giveaway host page
-  router.get('/:guildId', (req, res) => {
+  router.get('/:guildId', asyncHandler(async (req, res) => {
     const { guildId } = req.params;
 
-    if (!canAccessGiveaways(req.user, guildId)) {
+    if (!(await canAccessGiveaways(req.user, guildId))) {
       return res.status(403).send('You do not have permission to manage giveaways in this server.');
     }
 
     const botGuild = client.guilds.cache.get(guildId);
     if (!botGuild) return res.status(404).send('Bot is not in this guild');
 
-    const settings = getSettings(guildId);
+    const settings = await getSettings(guildId);
 
     // If giveaway channel is locked, only show that channel
     let channels;
@@ -74,7 +77,7 @@ module.exports = function (client) {
       channels,
       settings,
     });
-  });
+  }));
 
   return router;
 };
