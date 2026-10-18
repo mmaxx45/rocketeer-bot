@@ -12,6 +12,8 @@ for the people running the bot rather than as a list of commits.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-19
+
 ### Added
 
 - `rocketeer setup` asks for the Discord bot token, client ID, client secret and the
